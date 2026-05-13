@@ -1,11 +1,22 @@
 from fastapi import FastAPI
+import pymysql
 
-app = FastAPI(
-    title="CoffeeChat API",
-    description="AI 기반 멘토링 플랫폼 백엔드 서버",
-    version="1.0.0"
-)
+app = FastAPI()
 
 @app.get("/")
-async def root():
-    return {"message": "커피챗 API 서버가 정상적으로 실행 중입니다 ☕"}
+def read_root():
+    return {"status": "Server is Running", "project": "CoffeeChat"}
+
+@app.get("/db-test")
+def test_db():
+    try:
+        # 아까 Docker로 만든 MySQL 연결 테스트
+        conn = pymysql.connect(
+            host="localhost",
+            user="team03_admin",
+            password="team03_pw",
+            db="coffeechat"
+        )
+        return {"status": "DB Connected Successfully"}
+    except Exception as e:
+        return {"error": str(e)}
