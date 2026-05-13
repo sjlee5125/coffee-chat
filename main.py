@@ -1,7 +1,16 @@
 from fastapi import FastAPI
 import pymysql
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 모든 도메인 허용 (테스트용)
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 @app.get("/")
 def read_root():
@@ -20,3 +29,7 @@ def test_db():
         return {"status": "DB Connected Successfully"}
     except Exception as e:
         return {"error": str(e)}
+    
+
+
+
