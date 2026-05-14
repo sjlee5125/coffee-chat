@@ -1,17 +1,14 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, status # status 추가
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
-from urllib.parse import quote  # 한글 인코딩을 위해 필수 추가
+from urllib.parse import quote
 from models import User, get_db, create_tables, UserRole
 import auth
 
-# 서버 시작 시 DB 테이블 생성
 create_tables()
-
 app = FastAPI()
 
-# CORS 설정: 프론트엔드와 백엔드 간 통신 허용
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -19,23 +16,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/")
-def root():
-    return {"message": "CoffeeChat Backend Running"}
-
-# --- 카카오 로그인 콜백 엔드포인트 ---
 @app.get("/login/kakao/callback")
 async def kakao_callback(code: str, db: Session = Depends(get_db)):
     try:
-        # 1. 인가 코드로 카카오 액세스 토큰 발급
         kakao_token = auth.get_kakao_token(code)
-        
-        # 2. 액세스 토큰으로 사용자 정보 가져오기
         kakao_user = auth.get_kakao_user_info(kakao_token)
+        
         kakao_id = str(kakao_user.get("id"))
-        nickname = kakao_user.get("properties", {}).get("nickname")
+        
+        # [수정] 닉네임을 가져오는 경로를 더 확실하게 변경 (User로 나오는 문제 해결)
+        nickname = (
+            kakao_user.get("properties", {}).get("nickname") or 
+            kakao_user.get("kakao_account", {}).get("profile", {}).get("nickname") or 
+            "사용자"
+        )
 
-        # 3. DB에서 기존 유저 확인 및 신규 가입 처리
         user = db.query(User).filter(User.kakao_id == kakao_id).first()
         if not user:
             user = User(
@@ -47,17 +42,22 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
             db.add(user)
             db.commit()
             db.refresh(user)
+        else:
+            # [추가] 기존 유저의 경우 최신 닉네임으로 업데이트 (선택 사항)
+            if user.nickname != nickname:
+                user.nickname = nickname
+                db.commit()
 
-        # 4. 서비스 전용 JWT 토큰 생성
         access_token = auth.create_access_token(data={"sub": user.kakao_id})
 
-        # 5. 프론트엔드 메인 페이지로 리다이렉트 (토큰 및 닉네임 전달)
-        # 한글 이름 인코딩 및 포트 5173 적용
-        safe_nickname = quote(user.nickname) if user.nickname else "User"
+        # [수정] 한글 인코딩 및 리다이렉트 표준 상태 코드(302) 적용
+        safe_nickname = quote(user.nickname)
         frontend_url = f"http://48.211.169.52:5173/?token={access_token}&nickname={safe_nickname}"
         
-        print(f"🚀 [DEBUG] 리다이렉트 주소: {frontend_url}")
-        return RedirectResponse(url=frontend_url)
+        print(f"🚀 [DEBUG] 최종 리다이렉트 주소: {frontend_url}")
+        
+        # status_code=302를 명시하여 브라우저 차단 가능성을 낮춥니다.
+        return RedirectResponse(url=frontend_url, status_code=status.HTTP_302_FOUND)
 
     except Exception as e:
         print(f"❌ [ERROR] {str(e)}")
