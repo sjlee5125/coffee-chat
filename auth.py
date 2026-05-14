@@ -37,6 +37,7 @@ def create_access_token(data: dict):
 def get_kakao_token(code: str):
     """카카오 인가 코드로 액세스 토큰 요청"""
     url = "https://kauth.kakao.com/oauth/token"
+    print(f"DEBUG: 현재 사용 중인 REDIRECT_URI = {KAKAO_REDIRECT_URI}")
     data = {
         "grant_type": "authorization_code",
         "client_id": KAKAO_CLIENT_ID,
