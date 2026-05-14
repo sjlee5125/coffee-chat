@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from urllib.parse import quote
 import auth
 from models import User, get_db, create_tables, UserRole
-
+from fastapi.responses import RedirectResponse
 # 1. 서버 시작 시 DB 테이블 생성
 create_tables()
 
