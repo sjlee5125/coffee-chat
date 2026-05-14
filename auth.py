@@ -13,7 +13,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60
 # 2. 카카오 설정 (직접 할당)
 # 환경 변수 로드 문제 해결을 위해 실제 키와 URI를 변수에 직접 저장합니다.
 KAKAO_CLIENT_ID = "e2eb2fe1d550c2b3da05dcad347a4517"
-KAKAO_REDIRECT_URI = "http://48.211.169.52:8000/login/kakao/callback"
+KAKAO_REDIRECT_URI = "http://48.211.169.52:5173/login/kakao/callback"
 print(f"--- 서버 시작: CLIENT_ID={KAKAO_CLIENT_ID} ---")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
