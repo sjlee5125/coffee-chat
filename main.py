@@ -3,15 +3,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from urllib.parse import quote
+from pydantic import BaseModel
+from typing import Optional
 import auth
+import models
 from models import User, get_db, create_tables, UserRole
-from fastapi.responses import RedirectResponse
+
 # 1. 서버 시작 시 DB 테이블 생성
 create_tables()
 
 app = FastAPI()
 
-# 2. CORS 설정: 프론트엔드(localhost)와 백엔드(서버 IP) 간 통신 허용
+# 2. CORS 설정: 프론트엔드와 백엔드 간 통신 완전 허용
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -19,11 +22,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- 프로필 업데이트를 위한 데이터 검증 스키마 (추가) ---
+class ProfileUpdateRequest(BaseModel):
+    name: str
+    bio: Optional[str] = None
+    mbti: Optional[str] = None
+    hashtags: Optional[str] = None
+    experience: Optional[str] = None
+    portfolio_url: Optional[str] = None
+    help_provide: Optional[str] = None
+    help_receive: Optional[str] = None
+
+
 @app.get("/")
 def root():
     return {"message": "CoffeeChat Backend Running"}
 
-# --- 카카오 로그인 콜백 엔드포인트 ---
+
+
 @app.get("/login/kakao/callback")
 async def kakao_callback(code: str, db: Session = Depends(get_db)):
     try:
@@ -32,46 +48,77 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
         
         # 2. 액세스 토큰으로 사용자 정보 가져오기
         kakao_user = auth.get_kakao_user_info(kakao_token)
-        kakao_id = str(kakao_user.get("id"))
+        provider_id = str(kakao_user.get("id"))
         
-        # [수정] 닉네임을 가져오는 경로 보강 (이름이 'User'로 나오는 문제 해결)
-        nickname = (
+        # 카카오 계정의 이메일 추출 (없을 경우 식별자를 활용한 가상 이메일 생성)
+        email = kakao_user.get("kakao_account", {}).get("email") or f"{provider_id}@kakao.com"
+        
+        # 닉네임을 가져오는 경로 보강 (새로운 'name' 필드에 매핑)
+        name = (
             kakao_user.get("properties", {}).get("nickname") or 
             kakao_user.get("kakao_account", {}).get("profile", {}).get("nickname") or 
-            "이승재"  # 기본값 설정
+            "이승재"
         )
 
-        # 3. DB에서 기존 유저 확인 및 신규 가입 처리
-        user = db.query(User).filter(User.kakao_id == kakao_id).first()
+        # 3. DB에서 기존 유저 확인 및 신규 가입 처리 (PostgreSQL 스키마 매핑)
+        user = db.query(User).filter(User.provider_id == provider_id).first()
+        
+        is_new_user = False  # 신규 가입자인지 판별하는 플래그
+        
         if not user:
             user = User(
-                kakao_id=kakao_id, 
-                nickname=nickname, 
+                email=email,
+                name=name, 
                 role=UserRole.MENTEE, 
-                provider="kakao"
+                provider="kakao",
+                provider_id=provider_id
             )
             db.add(user)
             db.commit()
             db.refresh(user)
+            is_new_user = True  # 신규 회원이므로 프로필 페이지 유도용 변수 세팅
         else:
-            # 기존 유저의 경우 최신 닉네임으로 업데이트
-            if user.nickname != nickname:
-                user.nickname = nickname
+            # 기존 유저의 경우 이름 변경 사항이 있다면 업데이트
+            if user.name != name:
+                user.name = name
                 db.commit()
 
-        # 4. 서비스 전용 JWT 토큰 생성
-        access_token = auth.create_access_token(data={"sub": user.kakao_id})
+        # 4. 서비스 전용 JWT 토큰 생성 (sub에 유저의 고유 이메일 주입)
+        access_token = auth.create_access_token(data={"sub": user.email, "user_id": user.id})
 
-        # 5. 프론트엔드 리다이렉트 설정
-        # [핵심 수정] 프론트엔드가 로컬 PC에서 실행 중이므로 localhost:5173으로 보냅니다.
-        safe_nickname = quote(user.nickname)
-        frontend_url = f"http://localhost:5173/?token={access_token}&nickname={safe_nickname}"
+        safe_name = quote(user.name)
         
-        print(f"🚀 [DEBUG] 리다이렉트 대상 주소: {frontend_url}")
+        # 💡 [라우팅 분기] 신규 회원이면 /profile-setup 으로 직행하고, 기존 회원이면 메인(/)으로 이동
+        if is_new_user:
+            frontend_url = f"http://localhost:5173/profile-setup?token={access_token}&name={safe_name}&email={user.email}&id={user.id}"
+        else:
+            frontend_url = f"http://localhost:5173/?token={access_token}&name={safe_name}"
         
-        # 안전한 페이지 전환을 위해 302 Found 상태 코드를 사용합니다.
+        print(f" [DEBUG] 리다이렉트 대상 주소: {frontend_url}")
         return RedirectResponse(url=frontend_url, status_code=status.HTTP_302_FOUND)
 
     except Exception as e:
-        print(f"❌ [ERROR] {str(e)}")
+        print(f" [ERROR] {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# --- [추가] ProfileSetup 페이지에서 최종 완성 시 호출할 프로필 업데이트 엔드포인트 ---
+@app.put("/api/user/profile/{user_id}")
+def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="존재하지 않는 사용자입니다.")
+        
+    # 클라이언트(React)가 쏜 데이터를 DB 레코드에 업데이트
+    user.name = request.name
+    user.bio = request.bio
+    user.mbti = request.mbti
+    user.hashtags = request.hashtags
+    user.experience = request.experience
+    user.portfolio_url = request.portfolio_url
+    user.help_provide = request.help_provide
+    user.help_receive = request.help_receive
+    
+    db.commit()  # PostgreSQL 완벽 영속화
+    
+    return {"message": "프로필 정보가 성공적으로 바인딩되었습니다."}

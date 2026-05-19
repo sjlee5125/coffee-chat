@@ -48,7 +48,6 @@ def get_kakao_token(code: str):
     response = requests.post(url, data=data)
     
     if response.status_code != 200:
-        # 실패 시 카카오 서버의 상세 에러 메시지를 반환하여 디버깅을 돕습니다.
         error_data = response.json()
         error_msg = error_data.get("error_description", "카카오 토큰 발급 실패")
         raise HTTPException(status_code=400, detail=f"Kakao API Error: {error_msg}")
