@@ -113,7 +113,7 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
 
 
 # --- 💡 [추가] ProfileSetup 및 Dashboard 초기 동기화용 유저 단건 조회 API ---
-app.get("/api/user/{user_id}")
+@app.get("/api/user/{user_id}")
 def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
     print(f" [유저 전체 프로필 조회 요청] User ID: {user_id}")
     user = db.query(User).filter(User.id == user_id).first()
