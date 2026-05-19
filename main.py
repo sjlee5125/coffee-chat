@@ -63,22 +63,24 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
         # 3. DB에서 기존 유저 확인 및 신규 가입 처리 (PostgreSQL 스키마 매핑)
         user = db.query(User).filter(User.provider_id == provider_id).first()
         
-        is_new_user = False  # 신규 가입자인지 판별하는 플래그
+        is_new_user = False
         
         if not user:
+            print(f" [DEBUG] DB에 없는 신규 유저 발견! 가입을 시작합니다. ID: {provider_id}")
             user = User(
                 email=email,
                 name=name, 
                 role=UserRole.MENTEE, 
                 provider="kakao",
-                provider_id=provider_id
+                provider_id=provider_id  # 💡 이 부분이 DB의 provider_id 컬럼에 똑바로 들어가는지 확인
             )
             db.add(user)
-            db.commit()
-            db.refresh(user)
-            is_new_user = True  # 신규 회원이므로 프로필 페이지 유도용 변수 세팅
+            db.commit()          # 💡 PostgreSQL에 실제 INSERT 명령을 날리는 순간
+            db.refresh(user)     # 💡 DB가 생성해준 고유 id(pk)값을 파이썬 객체로 받아옴
+            is_new_user = True
+            print(f" [DEBUG] DB 가입 성공! 생성된 내부 유저 ID(PK): {user.id}")
         else:
-            # 기존 유저의 경우 이름 변경 사항이 있다면 업데이트
+            print(f" [DEBUG] 이미 DB에 존재하는 유저입니다. 내부 ID(PK): {user.id} -> 로그인 처리")
             if user.name != name:
                 user.name = name
                 db.commit()
