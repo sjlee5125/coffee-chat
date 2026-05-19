@@ -17,7 +17,7 @@ class UserRole(enum.Enum):
 
 class User(Base):
     __tablename__ = "users"
-
+    __table_args__ = {'schema': 'public'}
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255), unique=True, nullable=False, index=True) 
     name = Column(String(100), nullable=False)                        
