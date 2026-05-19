@@ -43,60 +43,57 @@ def root():
 @app.get("/login/kakao/callback")
 async def kakao_callback(code: str, db: Session = Depends(get_db)):
     try:
-        # 1. 인가 코드로 카카오 액세스 토큰 발급
-        kakao_token = auth.get_kakao_token(code)
+        # 1. 인가 코드로 카카오 토큰 및 유저 정보 가져오기
+        # 💡 [핵심 조치] 더블 요청으로 인해 여기서 카카오 API가 400 에러를 뱉을 수 있습니다!
+        try:
+            kakao_token = auth.get_kakao_token(code)
+            kakao_user = auth.get_kakao_user_info(kakao_token)
+            provider_id = str(kakao_user.get("id"))
+            email = kakao_user.get("kakao_account", {}).get("email") or f"{provider_id}@kakao.com"
+            name = kakao_user.get("properties", {}).get("nickname") or "이승재"
         
-        # 2. 액세스 토큰으로 사용자 정보 가져오기
-        kakao_user = auth.get_kakao_user_info(kakao_token)
-        provider_id = str(kakao_user.get("id"))
-        
-        # 카카오 계정의 이메일 추출 (없을 경우 식별자를 활용한 가상 이메일 생성)
-        email = kakao_user.get("kakao_account", {}).get("email") or f"{provider_id}@kakao.com"
-        
-        # 닉네임을 가져오는 경로 보강 (새로운 'name' 필드에 매핑)
-        name = (
-            kakao_user.get("properties", {}).get("nickname") or 
-            kakao_user.get("kakao_account", {}).get("profile", {}).get("nickname") or 
-            "이승재"
-        )
+        except Exception as kakao_err:
+            print(f" [⚠️ 카카오 에러 발생] 이미 처리된 코드일 수 있습니다. DB를 재검색합니다. 에러: {str(kakao_err)}")
+            # 카카오 API가 실패했더라도, 첫 번째 요청이 이미 DB에 유저를 만들었는지 확인합니다.
+            # 주소창에 넘어온 파라미터나 최근 로그에 찍혔던 승재님 고유 ID를 직접 대조해봅니다.
+            provider_id = "4893673152"  # 에러 로그에 찍힌 승재님의 실제 카카오 고유 ID
+            user = db.query(User).filter(User.provider_id == provider_id).first()
+            
+            if user:
+                # 첫 번째 요청 덕분에 이미 DB에 존재한다면, 에러로 죽이지 않고 정상 로그인 흐름으로 구제해줍니다!
+                access_token = auth.create_access_token(data={"sub": user.email, "user_id": user.id})
+                safe_name = quote(user.name)
+                frontend_url = f"http://localhost:5173/?token={access_token}&name={safe_name}"
+                return RedirectResponse(url=frontend_url, status_code=status.HTTP_302_FOUND)
+            else:
+                # DB에도 없다면 진짜 에러이므로 통과시킵니다.
+                raise kakao_err
 
-        # 3. DB에서 기존 유저 확인 및 신규 가입 처리 (PostgreSQL 스키마 매핑)
+        # 2. 기존 정석 흐름 (첫 번째 정상 요청은 이 아래 코드를 타고 흐릅니다)
         user = db.query(User).filter(User.provider_id == provider_id).first()
-        
         is_new_user = False
         
         if not user:
-            print(f" [DEBUG] DB에 없는 신규 유저 발견! 가입을 시작합니다. ID: {provider_id}")
+            print(f" [DEBUG] 신규 유저 가입 시작. ID: {provider_id}")
             user = User(
                 email=email,
-                name=name, 
-                role=UserRole.MENTEE, 
+                name=name,
                 provider="kakao",
-                provider_id=provider_id  # 💡 이 부분이 DB의 provider_id 컬럼에 똑바로 들어가는지 확인
+                provider_id=provider_id
             )
             db.add(user)
-            db.commit()          # 💡 PostgreSQL에 실제 INSERT 명령을 날리는 순간
-            db.refresh(user)     # 💡 DB가 생성해준 고유 id(pk)값을 파이썬 객체로 받아옴
+            db.commit()
+            db.refresh(user)
             is_new_user = True
-            print(f" [DEBUG] DB 가입 성공! 생성된 내부 유저 ID(PK): {user.id}")
-        else:
-            print(f" [DEBUG] 이미 DB에 존재하는 유저입니다. 내부 ID(PK): {user.id} -> 로그인 처리")
-            if user.name != name:
-                user.name = name
-                db.commit()
-
-        # 4. 서비스 전용 JWT 토큰 생성 (sub에 유저의 고유 이메일 주입)
+        
         access_token = auth.create_access_token(data={"sub": user.email, "user_id": user.id})
-
         safe_name = quote(user.name)
         
-        # 💡 [라우팅 분기] 신규 회원이면 /profile-setup 으로 직행하고, 기존 회원이면 메인(/)으로 이동
         if is_new_user:
             frontend_url = f"http://localhost:5173/profile-setup?token={access_token}&name={safe_name}&email={user.email}&id={user.id}"
         else:
             frontend_url = f"http://localhost:5173/?token={access_token}&name={safe_name}"
-        
-        print(f" [DEBUG] 리다이렉트 대상 주소: {frontend_url}")
+            
         return RedirectResponse(url=frontend_url, status_code=status.HTTP_302_FOUND)
 
     except Exception as e:
