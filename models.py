@@ -26,7 +26,7 @@ class User(Base):
    
     provider = Column(String(50), default="local")                     
     provider_id = Column(String(255), unique=True, nullable=True)      
-    role = Column(Enum(UserRole), default=UserRole.MENTEE)
+   
     
     
     bio = Column(Text, nullable=True)                                  
