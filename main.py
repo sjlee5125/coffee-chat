@@ -113,19 +113,26 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
 
 
 # --- 💡 [추가] ProfileSetup 및 Dashboard 초기 동기화용 유저 단건 조회 API ---
-@app.get("/api/user/{user_id}")
+app.get("/api/user/{user_id}")
 def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
-    print(f" [유저 단건 조회] User ID: {user_id}")
+    print(f" [유저 전체 프로필 조회 요청] User ID: {user_id}")
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="존재하지 않는 사용자입니다.")
+        
+    # 💡 유저 테이블에 박혀있는 모든 컬럼 항목들을 빠짐없이 JSON 포맷으로 넘겨줍니다!
     return {
         "id": user.id,
         "email": user.email,
-        "name": user.name
+        "name": user.name,
+        "bio": getattr(user, "bio", "") or "",
+        "mbti": getattr(user, "mbti", "") or "",
+        "hashtags": getattr(user, "hashtags", "") or "",
+        "experience": getattr(user, "experience", "") or "",
+        "portfolio_url": getattr(user, "portfolio_url", "") or "",
+        "help_provide": getattr(user, "help_provide", "") or "",
+        "help_receive": getattr(user, "help_receive", "") or ""
     }
-
-
 # --- ProfileSetup 페이지에서 최종 완성 시 호출할 프로필 업데이트 엔드포인트 ---
 @app.put("/api/user/profile/{user_id}")
 def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session = Depends(get_db)):
