@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 from jose import jwt, JWTError
 from fastapi import HTTPException, status
 import requests
+from datetime import datetime, timedelta, timezone # 💡 timezone 추가
+from jose import jwt, JWTError
 
 # 1. 보안 설정
 SECRET_KEY = "coffee-chat-secret-key" 
@@ -29,7 +31,9 @@ def verify_password(plain_password, hashed_password):
 def create_access_token(data: dict):
     """서비스 전용 JWT 액세스 토큰 생성"""
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    
+    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
