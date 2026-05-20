@@ -14,7 +14,7 @@ from models import Booking, Mentor # 생성한 모델 임포트
 from openai import AzureOpenAI 
 # 💡 dotenv 라이브러리 임포트
 from dotenv import load_dotenv
-
+import os
 # 💡 서버 시작 시 .env 파일의 환경변수를 시스템에 로드합니다.
 load_dotenv()
 # 1. 서버 시작 시 DB 테이블 생성
