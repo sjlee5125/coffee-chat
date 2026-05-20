@@ -34,9 +34,9 @@ if not all([AZURE_OPENAI_KEY, AZURE_OPENAI_ENDPOINT, AZURE_DEPLOYMENT_NAME]):
 
 # Azure OpenAI 클라이언트 초기화
 ai_client = AzureOpenAI(
-    api_key=AZURE_OPENAI_KEY,  
-    api_version=AZURE_API_VERSION,
-    azure_endpoint=AZURE_OPENAI_ENDPOINT
+    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+    api_key=os.getenv("AZURE_OPENAI_KEY"),
+    api_version="2024-02-15-preview"  # 💡 여기에 직접 버전을 꽂아버립니다!
 )
 
 class AIQuestionRequest(BaseModel):
