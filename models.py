@@ -23,20 +23,14 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False, index=True) 
     name = Column(String(100), nullable=False)                        
     password_hash = Column(String(255), nullable=True)                 
-    
-   
     provider = Column(String(50), default="local")                     
     provider_id = Column(String(255), unique=True, nullable=True)      
-   
-    
-    
     bio = Column(Text, nullable=True)                                  
     mbti = Column(String(4), nullable=True)                            
     hashtags = Column(String(255), nullable=True)                      
     experience = Column(Text, nullable=True)                           
     portfolio_url = Column(Text, nullable=True)                        
-    portfolio_file_path = Column(Text, nullable=True)                  
-    help_provide = Column(Text, nullable=True)                         
+    portfolio_file_path = Column(Text, nullable=True)                                           
     help_receive = Column(Text, nullable=True)                         
     # 계정 생성일 자동 기록
     created_at = Column(DateTime, server_default=func.now())
