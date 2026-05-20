@@ -45,9 +45,10 @@ class AIQuestionRequest(BaseModel):
 # 2. 💡 [수정 핵심] CORS 설정 교정 (allow_credentials=True 스펙 준수)
 # allow_credentials가 True일 때는 origins 주소를 정확하게 명시해야 브라우저 차단이 풀립니다.
 origins = [
-    "http://localhost:5173",    # 로컬 개발 환경 리액트 주소
+    "http://localhost:5173",    
     "http://127.0.0.1:5173",  
-    "http://48.211.169.52",     # 리눅스 퍼블릭 IP 인스턴스 주소
+    "http://48.211.169.52",     
+    "http://48.211.169.52:8000", # 💡 백엔드 포트 주소도 명시적으로 추가!
 ]
 
 app.add_middleware(
