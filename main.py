@@ -8,11 +8,39 @@ from typing import Optional, List, Dict, Any
 import auth
 from models import User, get_db, create_tables, UserRole
 from datetime import datetime, timedelta, timezone
+from pydantic import BaseModel
+from datetime import date
+from models import Booking, Mentor # 생성한 모델 임포트
+from openai import AzureOpenAI 
+# 💡 dotenv 라이브러리 임포트
+from dotenv import load_dotenv
 
+# 💡 서버 시작 시 .env 파일의 환경변수를 시스템에 로드합니다.
+load_dotenv()
 # 1. 서버 시작 시 DB 테이블 생성
 create_tables()
 
 app = FastAPI()
+
+# 💡 os.getenv()를 통해 .env 파일에 적힌 값을 안전하게 가져옵니다.
+AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY")
+AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
+AZURE_DEPLOYMENT_NAME = os.getenv("AZURE_DEPLOYMENT_NAME")
+AZURE_API_VERSION = os.getenv("AZURE_API_VERSION")
+
+# 필수 환경 변수가 누락되었는지 검증
+if not all([AZURE_OPENAI_KEY, AZURE_OPENAI_ENDPOINT, AZURE_DEPLOYMENT_NAME]):
+    print("⚠️ [경고] Azure OpenAI 환경 변수 중 일부가 .env 파일에 설정되지 않았습니다.")
+
+# Azure OpenAI 클라이언트 초기화
+ai_client = AzureOpenAI(
+    api_key=AZURE_OPENAI_KEY,  
+    api_version=AZURE_API_VERSION,
+    azure_endpoint=AZURE_OPENAI_ENDPOINT
+)
+
+class AIQuestionRequest(BaseModel):
+    memo: str
 
 # 2. 💡 [수정 핵심] CORS 설정 교정 (allow_credentials=True 스펙 준수)
 # allow_credentials가 True일 때는 origins 주소를 정확하게 명시해야 브라우저 차단이 풀립니다.
@@ -41,6 +69,15 @@ class ProfileUpdateRequest(BaseModel):
     help_provide: Optional[str] = None
     help_receive: Optional[str] = None
 
+# --- 데이터 검증 스키마 ---
+class AIQuestionRequest(BaseModel):
+    memo: str
+
+class BookingCreateRequest(BaseModel):
+    mentorId: int
+    date: date
+    time: str
+    questions: str
 
 @app.get("/")
 def root():
@@ -185,3 +222,45 @@ def get_mentor_dashboard_data(user_id: int, db: Session = Depends(get_db)):
         "stats": stats_data,
         "upcoming_chats": upcoming_chats
     }
+
+# --- 1. AI 질문 생성 API ---
+@app.post("/api/ai/generate-questions")
+async def generate_ai_questions(request: AIQuestionRequest):
+    print(f" [AI 질문 생성 요청 접수] 메모 내용: {request.memo}")
+    
+    if not request.memo.strip():
+        raise HTTPException(status_code=400, detail="메모 내용이 비어 있습니다.")
+        
+    try:
+        system_prompt = (
+            "당신은 커리어 멘토링 서비스의 질문 추천 AI 어시스턴트입니다. "
+            "사용자가 멘토에게 질문하고 싶은 내용을 두서없이 작성한 '메모'를 주면, "
+            "그 내용을 명확하고 전문적인 멘토링 질문 리스트(최대 3~4개)로 정제하여 답변해야 합니다. "
+            "답변 서론이나 결론(예: '여기 질문입니다' 등)은 모두 제외하고, "
+            "사용자가 바로 복사해서 쓸 수 있게 정제된 질문 리스트만 번호(1., 2., 3.) 형태로 줄바꿈하여 출력하세요."
+        )
+        
+        user_prompt = f"사용자 메모:\n{request.memo}"
+
+        # 비동기 엔드포인트 내에서 호출
+        response = ai_client.chat.completions.create(
+            model=AZURE_DEPLOYMENT_NAME, 
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt} # 💡 기존 'content' 오타를 'user' 역할로 교정했습니다.
+            ],
+            temperature=0.7,
+            max_tokens=1000
+        )
+        
+        suggested_questions = response.choices[0].message.content.strip()
+        print(f" [AI 질문 생성 성공] 응답 데이터 반환 완료")
+        
+        return {"aiQuestions": suggested_questions}
+        
+    except Exception as e:
+        print(f" [Azure OpenAI 에러 발생]: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"AI 질문 생성 중 내부 오류가 발생했습니다: {str(e)}"
+        )
