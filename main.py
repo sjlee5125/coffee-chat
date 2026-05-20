@@ -119,7 +119,6 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
         return RedirectResponse(url="http://localhost:5173/login?error=true", status_code=status.HTTP_302_FOUND)
 
 
-# --- ProfileSetup 및 Dashboard 초기 동기화용 유저 단건 조회 API ---
 @app.get("/api/user/{user_id}")
 def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
     print(f" [유저 전체 프로필 조회 요청] User ID: {user_id}")
