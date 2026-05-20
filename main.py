@@ -14,11 +14,18 @@ create_tables()
 
 app = FastAPI()
 
-# 2. CORS 설정: 프론트엔드와 백엔드 간 통신 완전 허용
+# 2. 💡 [수정 핵심] CORS 설정 교정 (allow_credentials=True 스펙 준수)
+# allow_credentials가 True일 때는 origins 주소를 정확하게 명시해야 브라우저 차단이 풀립니다.
+origins = [
+    "http://localhost:5173",    # 로컬 개발 환경 리액트 주소
+    "http://127.0.0.1:5173",  
+    "http://48.211.169.52",     # 리눅스 퍼블릭 IP 인스턴스 주소
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,  # 💡 자격 증명(토큰/쿠키) 안전 허용
+    allow_origins=origins,        # 와일드카드(*) 대신 안전한 오리진 리스트 바인딩
+    allow_credentials=True,       # 자격 증명(토큰/쿠키) 승인 활성화 유지
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -59,7 +66,7 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
             email = kakao_user.get("kakao_account", {}).get("email") or f"{provider_id}@kakao.com"
             name = kakao_user.get("properties", {}).get("nickname") or "이승재"
         except Exception as kakao_err:
-            print(f" [⚠️ 카카오 중복 요청 감지] 에러 무시 후 바로 직전 등록된 유저 기반 가드 구제 가동")
+            print(f" [ 카카오 중복 요청 감지] 에러 무시 후 바로 직전 등록된 유저 기반 가드 구제 가동")
             last_user = db.query(User).order_by(User.id.desc()).first()
             if last_user:
                 provider_id = last_user.provider_id
@@ -108,11 +115,11 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
         return RedirectResponse(url=frontend_url, status_code=status.HTTP_302_FOUND)
 
     except Exception as e:
-        print(f" [🔥 카카오 콜백 최종 치명적 붕괴 에러]: {str(e)}")
+        print(f" [ 카카오 콜백 최종 치명적 붕괴 에러]: {str(e)}")
         return RedirectResponse(url="http://localhost:5173/login?error=true", status_code=status.HTTP_302_FOUND)
 
 
-# --- 💡 [추가] ProfileSetup 및 Dashboard 초기 동기화용 유저 단건 조회 API ---
+# --- ProfileSetup 및 Dashboard 초기 동기화용 유저 단건 조회 API ---
 @app.get("/api/user/{user_id}")
 def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
     print(f" [유저 전체 프로필 조회 요청] User ID: {user_id}")
@@ -120,7 +127,6 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="존재하지 않는 사용자입니다.")
         
-    # 💡 유저 테이블에 박혀있는 모든 컬럼 항목들을 빠짐없이 JSON 포맷으로 넘겨줍니다!
     return {
         "id": user.id,
         "email": user.email,
@@ -133,6 +139,8 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
         "help_provide": getattr(user, "help_provide", "") or "",
         "help_receive": getattr(user, "help_receive", "") or ""
     }
+
+
 # --- ProfileSetup 페이지에서 최종 완성 시 호출할 프로필 업데이트 엔드포인트 ---
 @app.put("/api/user/profile/{user_id}")
 def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session = Depends(get_db)):
@@ -156,7 +164,7 @@ def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session
     return {"message": "프로필 정보가 성공적으로 바인딩되었습니다."}
 
 
-# --- 💡 [추가] 멘토 대시보드 실시간 통계 및 예정된 커피챗 연동 API ---
+# --- 멘토 대시보드 실시간 통계 및 예정된 커피챗 연동 API ---
 @app.get("/api/mentor/dashboard/{user_id}")
 def get_mentor_dashboard_data(user_id: int, db: Session = Depends(get_db)):
     print(f" [대시보드 데이터 요청 접수] User ID: {user_id}")
@@ -164,19 +172,15 @@ def get_mentor_dashboard_data(user_id: int, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="존재하지 않는 사용자입니다.")
         
-    # 💡 유저 모델에 통계 컬럼이 없을 경우를 대비하여 getattr 처리 (기본값 설정 가드)
     stats_data = {
         "name": user.name,
-        "total_chats": getattr(user, "total_chats", 127),       # DB 연동 가능
-        "total_earnings": getattr(user, "total_earnings", 9525), # DB 연동 가능
-        "average_rating": getattr(user, "average_rating", 4.9),  # DB 연동 가능
-        "mentoring_hours": getattr(user, "mentoring_hours", 63.5) # DB 연동 가능
+        "total_chats": getattr(user, "total_chats", 127),       
+        "total_earnings": getattr(user, "total_earnings", 9525), 
+        "average_rating": getattr(user, "average_rating", 4.9),  
+        "mentoring_hours": getattr(user, "mentoring_hours", 63.5) 
     }
     
-    # 💡 예정된 커피챗 더미 스케줄 리스트 서빙 (추후 CoffeeChat 매칭 테이블과 연결 가능)
-    upcoming_chats = [
-       
-    ]
+    upcoming_chats = []
     
     return {
         "stats": stats_data,
