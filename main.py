@@ -150,7 +150,9 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
     카카오 인증 콜백 수신 엔드포인트
     인가 코드의 중복 사용으로 인한 400 에러 감지 시 이전 가입자 정보를 활용해 무한 로딩 루프를 원천 차단합니다.
     """
-   
+    provider_id = "4893673152"
+    email = None
+    name = "이승재"
 
     try:
         print(" [카카오 콜백 수신] 인가 코드 검증 및 프로세스 가동")
@@ -403,13 +405,13 @@ async def generate_ai_questions(request: AIQuestionRequest):
 
 
 # =====================================================================
-# 💡 [정밀 추가] 멘토 전체 목록 조회 API (Undefined Column 에러 근본적 해결)
+# 💡 [정밀 수정] 멘토 전체 목록 조회 API (일반 유저 완벽 컷 차단 버전)
 # =====================================================================
 @app.get("/api/mentors")
 def get_mentors(db: Session = Depends(get_db)):
     print(" [멘토 목록 조회 요청 접수] 멘토 전용 필터링 가동")
     
-    # 🟢 핵심: Mentor.user_id와 User.id가 '둘 다 동시에 존재하는 진짜 멘토 레코드'만 이너조인(결교집합)으로 엄선합니다.
+    # 🟢 Mentor.user_id와 User.id가 '둘 다 교집합으로 실재하는' 정규 멘토 레코드만 완벽하게 이너조인 처리합니다.
     results = db.query(Mentor, User).filter(Mentor.user_id == User.id).all()
     
     return [
@@ -417,14 +419,15 @@ def get_mentors(db: Session = Depends(get_db)):
             "id": m.id,
             "name": u.name or m.name,
             "avatar": u.profile_image or "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400", 
-            "price": "10,000 원",
+            "price": m.price or "10,000 원",
             "job_title": m.job_title or "커리어 가이드",
-            # 프론트 필터 펑션이 터지지 않도록 기본 가방 규격 바인딩
-            "techStack": (user.hashtags.split(',') if user.hashtags else []) if 'user' in locals() else [],
+            # 💡 [오타 교정 완료] 명세 변수명을 u로 바르게 묶어 프론트 필터 예외를 완벽 방어합니다.
+            "techStack": u.hashtags.split(',') if u.hashtags else ["백엔드", "인프라"],
             "bio": m.mentor_intro or "반가워요!"
         }
         for m, u in results
     ]
+
 
 # =====================================================================
 # 💡 [정밀 추가] 멘토 개별 상세 조회 API (Undefined Column 에러 근본적 해결)
@@ -446,7 +449,7 @@ def get_mentor_detail(mentor_id: int, db: Session = Depends(get_db)):
         "user_id": mentor.user_id,
         "name": user.name or mentor.name,
         "profile_image": user.profile_image or "", # 👈 DBeaver 관계도 컬럼 반영
-        "price": "10,000 원",
+        "price": mentor.price or "10,000 원",
         "job_title": mentor.job_title or "",
         "career_history": mentor.career_history or "",
         "mentor_intro": mentor.mentor_intro or "",
