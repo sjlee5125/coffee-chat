@@ -424,21 +424,21 @@ async def generate_ai_questions(request: AIQuestionRequest):
 # =====================================================================
 @app.get("/api/mentors")
 def get_mentors(db: Session = Depends(get_db)):
-    # 💡 멘토 등록이 된 사람 중에서도, 이승훈(user_id=1)을 제외하고 싶다면?
-    mentors = db.query(Mentor).filter(Mentor.user_id != 1).all() # 여기서 강제로 1번 제외
+    # 🟢 조인(join)을 아예 제거했습니다. 오직 Mentor 테이블 데이터만 가져옵니다.
+    results = db.query(Mentor).all()
     
-    results = []
-    for m in mentors:
-        user = db.query(User).filter(User.id == m.user_id).first()
-        results.append({
+    return [
+        {
             "id": m.id,
-            "name": user.name if user else m.name,
+            "name": m.name or "멘토",
+            "avatar": "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400", # 기본 이미지
             "price": m.price or "10,000 원",
             "job_title": m.job_title or "커리어 가이드",
-            "techStack": user.hashtags.split(',') if user and user.hashtags else ["백엔드"],
+            "techStack": ["백엔드", "인프라"], # 필요 시 m.mentoring_topics 활용 가능
             "bio": m.mentor_intro or "반가워요!"
-        })
-    return results
+        }
+        for m in results
+    ]
 
 # =====================================================================
 # 💡 [정밀 추가] 멘토 개별 상세 조회 API (Undefined Column 에러 근본적 해결)
