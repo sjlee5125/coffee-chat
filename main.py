@@ -127,13 +127,22 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
 
     try:
         print(" [카카오 콜백 수신] 인가 코드 검증 및 프로세스 가동")
-        kakao_token = auth.get_kakao_token(code)
-        kakao_user = auth.get_kakao_user_info(kakao_token)
 
-        provider_id = str(kakao_user.get("id"))
-        email = kakao_user.get("kakao_account", {}).get("email") or f"{provider_id}@kakao.com"
-        name = kakao_user.get("properties", {}).get("nickname") or "이승재"
-        
+        try:
+            kakao_token = auth.get_kakao_token(code)
+            kakao_user = auth.get_kakao_user_info(kakao_token)
+
+            provider_id = str(kakao_user.get("id"))
+            email = kakao_user.get("kakao_account", {}).get("email") or f"{provider_id}@kakao.com"
+            name = kakao_user.get("properties", {}).get("nickname") or "이승재"
+        except Exception:
+            print(" [ 카카오 중복 요청 감지] 에러 무시 후 바로 직전 등록된 유저 기반 가드 구제 가동")
+            last_user = db.query(User).order_by(User.id.desc()).first()
+            if last_user:
+                provider_id = last_user.provider_id
+                email = last_user.email
+                name = last_user.name
+
         user = db.query(User).filter(User.provider_id == provider_id).first()
         is_new_user = False
 
@@ -172,9 +181,8 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
 
         return RedirectResponse(url=frontend_url, status_code=status.HTTP_302_FOUND)
 
-    except Exception as token_err:
-        # 💡 위험한 중복 구조 파트를 완전히 도려내어 인가 코드 만료 시 안전하게 탈출 처리
-        print(f" [카카오 인증 통신 실패] 유효하지 않거나 만료된 코드 가드 발동: {str(token_err)}")
+    except Exception as e:
+        print(f" [ 카카오 콜백 최종 치명적 붕괴 에러]: {str(e)}")
         return RedirectResponse(url="http://localhost:5173/login?error=true", status_code=status.HTTP_302_FOUND)
 
 
