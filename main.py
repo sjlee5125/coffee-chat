@@ -412,7 +412,7 @@ def get_mentors(db: Session = Depends(get_db)):
     print(" [멘토 목록 조회 요청 접수] 멘토 전용 필터링 가동")
     
     # 🟢 Mentor.user_id와 User.id가 '둘 다 교집합으로 실재하는' 정규 멘토 레코드만 완벽하게 이너조인 처리합니다.
-    results = db.query(Mentor, User).filter(Mentor.user_id == User.id).all()
+    results = db.query(Mentor, User).join(User, Mentor.user_id == User.id).all()
     
     return [
         {
@@ -421,7 +421,6 @@ def get_mentors(db: Session = Depends(get_db)):
             "avatar": u.profile_image or "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400", 
             "price": m.price or "10,000 원",
             "job_title": m.job_title or "커리어 가이드",
-            # 💡 [오타 교정 완료] 명세 변수명을 u로 바르게 묶어 프론트 필터 예외를 완벽 방어합니다.
             "techStack": u.hashtags.split(',') if u.hashtags else ["백엔드", "인프라"],
             "bio": m.mentor_intro or "반가워요!"
         }
