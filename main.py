@@ -467,6 +467,6 @@ for route in app.routes:
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    
     # 백엔드 서버를 0.0.0.0 IP 대역의 8000번 포트로 구동시킵니다.
     uvicorn.run(app, host="0.0.0.0", port=8000)
