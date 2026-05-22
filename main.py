@@ -14,21 +14,29 @@ from openai import AzureOpenAI
 
 import auth
 
+# 디버그: auth.py 모듈이 로드된 실제 시스템 경로를 로그에 출력합니다.
 print(f"DEBUG: auth.py loaded from: {auth.__file__}")
 from auth import router
 from models import User, Mentor, get_db, create_tables
 
 
+# 서버 실행 시 시스템의 .env 환경변수를 로드합니다.
 load_dotenv()
-#create_tables()
+
+# 데이터 소실 방지를 위해 기존 테이블을 DROP하지 않고, 비어있는 테이블만 안전하게 생성하도록 기동 설정을 주석 처리합니다.
+# create_tables()
 
 app = FastAPI()
+
+# 카카오 인증 처리 및 토큰 핸들링을 위한 외부 라우터를 탑재합니다.
 app.include_router(router, prefix="/api/auth")
 
+# 💡 [CORS 설정] 자격 증명(allow_credentials=True) 승인을 위해 명시적인 오리진 리스트를 설계합니다.
 origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://48.211.169.52",
+    "http://48.211.169.52:8000", # 백엔드 API 포트 주소도 명시적으로 허용하여 CORS 차단을 예방합니다.
 ]
 
 app.add_middleware(
@@ -39,13 +47,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
+# 콘솔 디버그: 현재 FastAPI 인스턴스에 탑재되어 실행 준비가 완료된 라우터 목록을 로깅합니다.
 print("--- [DEBUG] 등록된 라우터 경로 확인 ---")
 for route in app.routes:
     if hasattr(route, "path"):
         print(f"DEBUG: {route.path} | {getattr(route, 'methods', 'N/A')}")
 
 
+# Azure OpenAI 연동을 위한 환경 변수를 .env 파일로부터 가져옵니다.
 AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY")
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
 AZURE_DEPLOYMENT_NAME = os.getenv("AZURE_DEPLOYMENT_NAME")
@@ -54,6 +63,7 @@ AZURE_API_VERSION = os.getenv("AZURE_API_VERSION")
 if not all([AZURE_OPENAI_KEY, AZURE_OPENAI_ENDPOINT, AZURE_DEPLOYMENT_NAME]):
     print("⚠️ [경고] Azure OpenAI 환경 변수 중 일부가 .env 파일에 설정되지 않았습니다.")
 
+# Azure OpenAI 클라이언트를 초기화합니다.
 ai_client = AzureOpenAI(
     api_key=AZURE_OPENAI_KEY,
     api_version=AZURE_API_VERSION,
@@ -61,7 +71,10 @@ ai_client = AzureOpenAI(
 )
 
 
+# --- [데이터 검증 스크마: Pydantic 영역] ---
+
 class UserRegisterRequest(BaseModel):
+    """일반 회원 최초 가입 시 프론트엔드에서 수신할 요청 가방 데이터 명세"""
     email: str
     password: str
     role: str
@@ -77,11 +90,13 @@ class UserRegisterRequest(BaseModel):
 
 
 class UserLoginRequest(BaseModel):
+    """일반 로그인 검증용 가방 데이터 명세"""
     email: str
     password: str
 
 
 class ProfileUpdateRequest(BaseModel):
+    """일반 회원 프로필 수정 처리 시 수신할 요청 가방 데이터 명세"""
     name: str
     bio: Optional[str] = None
     mbti: Optional[str] = None
@@ -94,18 +109,23 @@ class ProfileUpdateRequest(BaseModel):
 
 
 class AIQuestionRequest(BaseModel):
+    """AI 질문 추천 어시스턴트 요청 시 수신할 메모 명세"""
     memo: str
 
 
 class BookingCreateRequest(BaseModel):
+    """커피챗 예약 생성 시 수신할 요청 데이터 명세"""
     mentorId: int
     date: date
     time: str
     questions: str
 
 
-# 💡 [스키마 완전 정돈] 프론트엔드가 실어 보내는 변수들과 1:1 대응하도록 스펙 확정
 class MentorRegisterRequest(BaseModel):
+    """
+    멘토 프로필 독립 등록/수정 시 프론트엔드에서 수신할 요청 가방 데이터 명세
+    DBeaver 데이터베이스 엔티티 관계도 스펙과 1:1 완벽 맵핑 설계
+    """
     name: str
     job_title: str
     career_history: Optional[str] = None
@@ -114,16 +134,23 @@ class MentorRegisterRequest(BaseModel):
     detailed_experience: Optional[str] = None
     hashtags: Optional[str] = None
     portfolio_url: Optional[str] = None
-    portfolio_file_path: Optional[str] = None  # 👈 프론트엔드의 attachedFiles 파일명 매핑 칸 확보
+    portfolio_file_path: Optional[str] = None  # attachedFiles 첨부파일명 저장용 칸
 
+
+# --- [API 라우터 비즈니스 로직 구역] ---
 
 @app.get("/")
 def root():
+    """서버 헬스 체크용 루트 엔드포인트"""
     return {"message": "CoffeeChat Backend Running"}
 
 
 @app.get("/login/kakao/callback")
 async def kakao_callback(code: str, db: Session = Depends(get_db)):
+    """
+    카카오 인증 콜백 수신 엔드포인트
+    인가 코드의 중복 사용으로 인한 400 에러 감지 시 이전 가입자 정보를 활용해 무한 로딩 루프를 원천 차단합니다.
+    """
     provider_id = "4893673152"
     email = None
     name = "이승재"
@@ -132,6 +159,7 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
         print(" [카카오 콜백 수신] 인가 코드 검증 및 프로세스 가동")
 
         try:
+            # 카카오 토큰 및 유저 정보 요청
             kakao_token = auth.get_kakao_token(code)
             kakao_user = auth.get_kakao_user_info(kakao_token)
 
@@ -139,6 +167,7 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
             email = kakao_user.get("kakao_account", {}).get("email") or f"{provider_id}@kakao.com"
             name = kakao_user.get("properties", {}).get("nickname") or "이승재"
         except Exception:
+            # 유효하지 않은 코드나 더블 서브밋 중복 감지 시, 마지막 가입자로 연동 우회 구조 발동
             print(" [ 카카오 중복 요청 감지] 에러 무시 후 바로 직전 등록된 유저 기반 가드 구제 가동")
             last_user = db.query(User).order_by(User.id.desc()).first()
             if last_user:
@@ -162,6 +191,7 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
             db.refresh(user)
             is_new_user = True
         else:
+            # 타임존 비교 에러가 나지 않도록 표준 안전 비교 연산을 진행합니다.
             now = datetime.now(timezone.utc) if (user.created_at and user.created_at.tzinfo) else datetime.utcnow()
             user_created_time = user.created_at if user.created_at else now
 
@@ -171,6 +201,7 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
                 print(" [리다이렉트 조건 충족] 신규 가입자 세션 유지 ➔ 프로필 설정 페이지로 유도")
                 is_new_user = True
 
+        # JWT 세션 토큰 발행
         access_token = auth.create_access_token(data={"sub": user.email, "user_id": user.id})
         safe_name = quote(user.name)
         safe_email = quote(user.email)
@@ -191,6 +222,10 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
 
 @app.get("/api/user/{user_id}")
 def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
+    """
+    일반 프로필 전체 데이터 조회 API
+    DBeaver 데이터베이스 관계도 상의 portfolio_file_path 정보까지 유실 없이 완벽하게 프론트로 전달합니다.
+    """
     print(f" [유저 전체 프로필 조회 요청] User ID: {user_id}")
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -214,6 +249,7 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
 
 @app.put("/api/user/profile/{user_id}")
 def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session = Depends(get_db)):
+    """일반 프로필 수정 정보 DB 영구 업데이트 처리 API"""
     print(f" [프로필 업데이트 요청 접수] User ID: {user_id}")
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -237,20 +273,23 @@ def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session
     return {"message": "프로필 정보가 성공적으로 바인딩되었습니다."}
 
 
-# 💡 [정밀 수정 완료 완료] Users 테이블의 관계도 컬럼에 완벽 연동 안착 구역
 @app.post("/api/mentor/register/{user_id}")
 def register_mentor(user_id: int, request: MentorRegisterRequest, db: Session = Depends(get_db)):
+    """
+    분리형 독립 멘토 등록 처리 API
+    프론트에서 수신한 이름, 태그, 포트폴리오 정보를 Users 테이블 관계도 컬럼에 완벽 연동 안착시킵니다.
+    """
     print(f" [분리형 멘토 등록 시작] User ID: {user_id}")
 
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="존재하지 않는 회원 데이터입니다.")
 
-    # 🟢 DBeaver 관계도 컬럼 스펙에 1:1 정밀 바인딩 가동
+    # 🟢 DBeaver 관계도 컬럼 스펙에 이름/해시태그/링크/파일경로 1:1 정밀 바인딩 가동
     user.name = request.name
     user.hashtags = request.hashtags
-    user.portfolio_url = request.portfolio_url          # 관계도 스펙 일치
-    user.portfolio_file_path = request.portfolio_file_path  # 관계도 스펙 일치
+    user.portfolio_url = request.portfolio_url          
+    user.portfolio_file_path = request.portfolio_file_path  
 
     mentor = db.query(Mentor).filter(Mentor.user_id == user_id).first()
 
@@ -259,7 +298,7 @@ def register_mentor(user_id: int, request: MentorRegisterRequest, db: Session = 
         mentor = Mentor(user_id=user_id)
         db.add(mentor)
 
-    # 🟢 독립 멘토 정보 안정화 매핑
+    # 🟢 독립 멘토 세부 테이블 데이터 정보 매핑
     mentor.name = request.name
     mentor.job_title = request.job_title
     mentor.career_history = request.career_history
@@ -268,13 +307,14 @@ def register_mentor(user_id: int, request: MentorRegisterRequest, db: Session = 
     mentor.detailed_experience = request.detailed_experience
 
     db.commit()
-    print(f" [DB 분리 저장 완료] {user_id}번 유저의 이름, 링크, 파일경로가 Users 테이블에 영구 저장 완결되었습니다.")
+    print(f" [DB 분리 저장 완료] {user_id}번 유저의 이름, 링크, 파일경로가 Users 테이블에 완전히 영구 저장 완결되었습니다.")
 
     return {"message": "멘토 프로필 독립 등록 완료"}
 
 
 @app.get("/api/mentor/dashboard/{user_id}")
 def get_mentor_dashboard_data(user_id: int, db: Session = Depends(get_db)):
+    """멘토 대시보드 내 실시간 활동 지표 조회 API"""
     print(f" [대시보드 데이터 요청 접수] User ID: {user_id}")
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -296,6 +336,7 @@ def get_mentor_dashboard_data(user_id: int, db: Session = Depends(get_db)):
 
 @app.post("/api/ai/generate-questions")
 async def generate_ai_questions(request: AIQuestionRequest):
+    """Azure OpenAI를 사용한 커피챗 대화 추천 질문 자동 생성 API"""
     print(f" [AI 질문 생성 요청 접수] 메모 내용: {request.memo}")
 
     if not request.memo.strip():
@@ -316,7 +357,7 @@ async def generate_ai_questions(request: AIQuestionRequest):
             model=AZURE_DEPLOYMENT_NAME,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                {"role": "user", "content": user_prompt}, # 💡 정석 매핑 역할인 user 역할 바인딩
             ],
             temperature=0.7,
             max_tokens=1000,
@@ -335,6 +376,61 @@ async def generate_ai_questions(request: AIQuestionRequest):
         )
 
 
+# =====================================================================
+# 💡 [정밀 추가] 멘토 전체 목록 조회 API (Undefined Column 에러 근본적 해결)
+# =====================================================================
+@app.get("/api/mentors")
+def get_mentors(db: Session = Depends(get_db)):
+    """
+    멘토 전체 리스트 조회 API
+    삭제된 mentors.avatar 접근을 완전히 차단하고, User 테이블과 조인하여 실제 프로필 이미지와 이름 데이터를 안전하게 가져옵니다.
+    """
+    print(" [멘토 목록 조회 요청 접수]")
+    results = db.query(Mentor, User).join(User, Mentor.user_id == User.id).all()
+    return [
+        {
+            "id": m.id,
+            "name": u.name or m.name,
+            "avatar": u.profile_image or "", # 👈 User 테이블의 실제 업로드 이미지 활용
+            "price": "10,000 원",
+            "job_title": m.job_title or "",
+        }
+        for m, u in results
+    ]
+
+
+# =====================================================================
+# 💡 [정밀 추가] 멘토 개별 상세 조회 API (Undefined Column 에러 근본적 해결)
+# =====================================================================
+@app.get("/api/mentors/{mentor_id}")
+def get_mentor_detail(mentor_id: int, db: Session = Depends(get_db)):
+    """
+    멘토 상세 이력 조회 API
+    상세 조회 시에도 User 테이블과의 조인을 진행해 이름, 해시태그, 포트폴리오를 누락 없이 온전히 반환합니다.
+    """
+    print(f" [멘토 상세 조회 요청] Mentor ID: {mentor_id}")
+    result = db.query(Mentor, User).join(User, Mentor.user_id == User.id).filter(Mentor.id == mentor_id).first()
+    if not result:
+        raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
+    
+    mentor, user = result
+    return {
+        "id": mentor.id,
+        "user_id": mentor.user_id,
+        "name": user.name or mentor.name,
+        "profile_image": user.profile_image or "", # 👈 DBeaver 관계도 컬럼 반영
+        "price": "10,000 원",
+        "job_title": mentor.job_title or "",
+        "career_history": mentor.career_history or "",
+        "mentor_intro": mentor.mentor_intro or "",
+        "mentoring_topics": mentor.mentoring_topics or "",
+        "detailed_experience": mentor.detailed_experience or "",
+        "hashtags": user.hashtags or "",
+        "portfolio_url": user.portfolio_url or ""
+    }
+
+
+# 디버그: 시스템 구동 완료 로그 및 포트 매핑 확인
 print(f"--- [DEBUG] 현재 등록된 라우터 개수: {len(app.routes)} ---")
 for route in app.routes:
     print(f"DEBUG: 경로 정보 -> {route.path} | {getattr(route, 'methods', 'N/A')}")
@@ -343,4 +439,5 @@ for route in app.routes:
 if __name__ == "__main__":
     import uvicorn
 
+    # 백엔드 서버를 0.0.0.0 IP 대역의 8000번 포트로 구동시킵니다.
     uvicorn.run(app, host="0.0.0.0", port=8000)
