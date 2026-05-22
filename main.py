@@ -19,7 +19,7 @@ from models import User, Mentor, get_db, create_tables
 
 
 load_dotenv()
-create_tables()
+#create_tables()
 
 app = FastAPI()
 app.include_router(router, prefix="/api/auth")
