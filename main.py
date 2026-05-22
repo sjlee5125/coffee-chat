@@ -463,31 +463,21 @@ def get_mentors(db: Session = Depends(get_db)):
 # =====================================================================
 @app.get("/api/mentors/{mentor_id}")
 def get_mentor_detail(mentor_id: int, db: Session = Depends(get_db)):
-    """
-    멘토 상세 이력 조회 API
-    상세 조회 시에도 User 테이블과의 조인을 진행해 이름, 해시태그, 포트폴리오를 누락 없이 온전히 반환합니다.
-    """
-    print(f" [멘토 상세 조회 요청] Mentor ID: {mentor_id}")
-    result = db.query(Mentor, User).join(User, Mentor.user_id == User.id).filter(Mentor.id == mentor_id).first()
-    if not result:
+    # 조인 없이 Mentor 테이블만 단독 조회
+    mentor = db.query(Mentor).filter(Mentor.id == mentor_id).first()
+    if not mentor:
         raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
     
-    mentor, user = result
     return {
         "id": mentor.id,
-        "user_id": mentor.user_id,
-        "name": user.name or mentor.name,
-        "profile_image": user.profile_image or "", # 👈 DBeaver 관계도 컬럼 반영
-        "price": mentor.price or "10,000 원",
-        "job_title": mentor.job_title or "",
-        "career_history": mentor.career_history or "",
-        "mentor_intro": mentor.mentor_intro or "",
-        "mentoring_topics": mentor.mentoring_topics or "",
-        "detailed_experience": mentor.detailed_experience or "",
-        "hashtags": user.hashtags or "",
-        "portfolio_url": user.portfolio_url or ""
+        "name": mentor.name, # 💡 이제 멘토가 직접 등록한 이름만 반환합니다.
+        "job_title": mentor.job_title,
+        "mentor_intro": mentor.mentor_intro,
+        "career_history": mentor.career_history,
+        "mentoring_topics": mentor.mentoring_topics,
+        "detailed_experience": mentor.detailed_experience,
+        "profile_image": "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400" # 기본 이미지
     }
-
 
 # =====================================================================
 # [신규] 멘토 가용 시간 관련 엔드포인트
