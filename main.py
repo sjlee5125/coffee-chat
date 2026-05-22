@@ -424,32 +424,29 @@ async def generate_ai_questions(request: AIQuestionRequest):
 # =====================================================================
 @app.get("/api/mentors")
 def get_mentors(db: Session = Depends(get_db)):
-    print(" [멘토 목록 조회 요청 접수] 안전한 멘토 데이터 추출 시작")
+    print(" [멘토 목록 조회] Mentor 테이블만 단독 조회 가동")
     
-    # 1. 멘토 테이블의 데이터를 모두 가져옵니다.
-    results = db.query(Mentor, User).join(User, Mentor.user_id == User.id).all()
+    # 1. Mentor 테이블을 기준으로 데이터를 먼저 다 가져옵니다.
+    # Mentor 테이블에 행이 존재하는(즉, 멘토로 등록된) 사람만 딱 골라집니다.
+    mentors = db.query(Mentor).all()
     
-    mentors_list = []
-    
-    # 2. 튜플을 안전하게 분해하여 리스트를 구성합니다.
-    for row in results:
-        # row는 (Mentor, User) 튜플입니다.
-        mentor_obj = row[0]
-        user_obj = row[1]
+    results = []
+    for m in mentors:
+        # 2. 해당 멘토의 user_id로 User 정보를 찾습니다.
+        user = db.query(User).filter(User.id == m.user_id).first()
         
-        # 3. 데이터가 없을 경우를 대비해 안전하게 값을 추출합니다.
-        mentors_list.append({
-            "id": mentor_obj.id,
-            "name": user_obj.name if user_obj else (mentor_obj.name or "멘토"),
-            "avatar": user_obj.profile_image if user_obj and user_obj.profile_image else "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400", 
-            "price": mentor_obj.price or "10,000 원",
-            "job_title": mentor_obj.job_title or "커리어 가이드",
-            "techStack": user_obj.hashtags.split(',') if user_obj and user_obj.hashtags else ["백엔드", "인프라"],
-            "bio": mentor_obj.mentor_intro or "반가워요!"
+        # 3. 멘토 테이블에 등록된 사람만 리스트에 넣습니다.
+        results.append({
+            "id": m.id,
+            "name": user.name if user else (m.name or "멘토"),
+            "avatar": user.profile_image if user and user.profile_image else "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400",
+            "price": m.price or "10,000 원",
+            "job_title": m.job_title or "커리어 가이드",
+            "techStack": user.hashtags.split(',') if user and user.hashtags else ["백엔드", "인프라"],
+            "bio": m.mentor_intro or "반가워요!"
         })
-    
-    return mentors_list
-
+        
+    return results
 
 # =====================================================================
 # 💡 [정밀 추가] 멘토 개별 상세 조회 API (Undefined Column 에러 근본적 해결)
