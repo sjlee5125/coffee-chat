@@ -424,28 +424,20 @@ async def generate_ai_questions(request: AIQuestionRequest):
 # =====================================================================
 @app.get("/api/mentors")
 def get_mentors(db: Session = Depends(get_db)):
-    print(" [멘토 목록 조회] Mentor 테이블만 단독 조회 가동")
-    
-    # 1. Mentor 테이블을 기준으로 데이터를 먼저 다 가져옵니다.
-    # Mentor 테이블에 행이 존재하는(즉, 멘토로 등록된) 사람만 딱 골라집니다.
-    mentors = db.query(Mentor).all()
+    # 💡 멘토 등록이 된 사람 중에서도, 이승훈(user_id=1)을 제외하고 싶다면?
+    mentors = db.query(Mentor).filter(Mentor.user_id != 1).all() # 여기서 강제로 1번 제외
     
     results = []
     for m in mentors:
-        # 2. 해당 멘토의 user_id로 User 정보를 찾습니다.
         user = db.query(User).filter(User.id == m.user_id).first()
-        
-        # 3. 멘토 테이블에 등록된 사람만 리스트에 넣습니다.
         results.append({
             "id": m.id,
-            "name": user.name if user else (m.name or "멘토"),
-            "avatar": user.profile_image if user and user.profile_image else "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400",
+            "name": user.name if user else m.name,
             "price": m.price or "10,000 원",
             "job_title": m.job_title or "커리어 가이드",
-            "techStack": user.hashtags.split(',') if user and user.hashtags else ["백엔드", "인프라"],
+            "techStack": user.hashtags.split(',') if user and user.hashtags else ["백엔드"],
             "bio": m.mentor_intro or "반가워요!"
         })
-        
     return results
 
 # =====================================================================
