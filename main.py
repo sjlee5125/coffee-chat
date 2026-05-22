@@ -289,7 +289,24 @@ def get_mentor_details(user_id: int, db: Session = Depends(get_db)):
         "detailed_experience": mentor.detailed_experience,
         "price": mentor.price or "10,000 원",
     }
-
+@app.get("/api/mentors/list")
+def get_mentors_list(db: Session = Depends(get_db)):
+    print(" [멘토 전체 리스트 조회 API 호출]")
+    
+    # Mentor 테이블과 User 테이블을 user_id 기준으로 조인(Join)하여 한 번에 조회합니다.
+    results = db.query(Mentor, User).join(User, Mentor.user_id == User.id).all()
+    
+    mentors_data = []
+    for mentor, user in results:
+        mentors_data.append({
+            "id": mentor.user_id, # 상세 페이지 라우팅을 위해 user_id 반환
+            "name": mentor.name,
+            "job_title": mentor.job_title or "직무 미상",
+            "hashtags": getattr(user, "hashtags", "") or "",
+            "profile_image": getattr(user, "profile_image", "") or "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400"
+        })
+        
+    return mentors_data
 
 @app.put("/api/user/profile/{user_id}")
 def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session = Depends(get_db)):
