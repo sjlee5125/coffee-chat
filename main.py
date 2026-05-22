@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict, List
 from dotenv import load_dotenv
 from openai import AzureOpenAI
 
@@ -17,7 +17,7 @@ import auth
 # 디버그: auth.py 모듈이 로드된 실제 시스템 경로를 로그에 출력합니다.
 print(f"DEBUG: auth.py loaded from: {auth.__file__}")
 from auth import router
-from models import User, Mentor, get_db, create_tables
+from models import User, Mentor, Booking, MentorAvailability, get_db, create_tables
 
 
 # 서버 실행 시 시스템의 .env 환경변수를 로드합니다.
@@ -134,6 +134,21 @@ class MentorRegisterRequest(BaseModel):
     hashtags: Optional[str] = None
     portfolio_url: Optional[str] = None
     portfolio_file_path: Optional[str] = None  # attachedFiles 첨부파일명 저장용 칸
+
+
+# [신규] 일정 관련 요청 모델
+class AvailabilityBulkRequest(BaseModel):
+    """멘토 가용 시간 bulk 저장 요청 명세"""
+    mentor_id: int
+    schedules: Dict[str, List[str]]  # { "2026-05-23": ["09:00", "09:30"], ... }
+
+
+class PenaltyRequest(BaseModel):
+    """멘토 귀책 예약 취소(패널티) 처리 요청 명세"""
+    mentor_id: int
+    date: str   # "2026-05-23"
+    time: str   # "09:00"
+    reason: str
 
 
 # --- [API 라우터 비즈니스 로직 구역] ---
@@ -409,23 +424,31 @@ async def generate_ai_questions(request: AIQuestionRequest):
 # =====================================================================
 @app.get("/api/mentors")
 def get_mentors(db: Session = Depends(get_db)):
-    print(" [멘토 목록 조회 요청 접수] 멘토 전용 필터링 가동")
+    print(" [멘토 목록 조회 요청 접수] 안전한 멘토 데이터 추출 시작")
     
-    # 🟢 Mentor.user_id와 User.id가 '둘 다 교집합으로 실재하는' 정규 멘토 레코드만 완벽하게 이너조인 처리합니다.
+    # 1. 멘토 테이블의 데이터를 모두 가져옵니다.
     results = db.query(Mentor, User).join(User, Mentor.user_id == User.id).all()
     
-    return [
-        {
-            "id": m.id,
-            "name": u.name or m.name,
-            "avatar": u.profile_image or "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400", 
-            "price": m.price or "10,000 원",
-            "job_title": m.job_title or "커리어 가이드",
-            "techStack": u.hashtags.split(',') if u.hashtags else ["백엔드", "인프라"],
-            "bio": m.mentor_intro or "반가워요!"
-        }
-        for m, u in results
-    ]
+    mentors_list = []
+    
+    # 2. 튜플을 안전하게 분해하여 리스트를 구성합니다.
+    for row in results:
+        # row는 (Mentor, User) 튜플입니다.
+        mentor_obj = row[0]
+        user_obj = row[1]
+        
+        # 3. 데이터가 없을 경우를 대비해 안전하게 값을 추출합니다.
+        mentors_list.append({
+            "id": mentor_obj.id,
+            "name": user_obj.name if user_obj else (mentor_obj.name or "멘토"),
+            "avatar": user_obj.profile_image if user_obj and user_obj.profile_image else "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400", 
+            "price": mentor_obj.price or "10,000 원",
+            "job_title": mentor_obj.job_title or "커리어 가이드",
+            "techStack": user_obj.hashtags.split(',') if user_obj and user_obj.hashtags else ["백엔드", "인프라"],
+            "bio": mentor_obj.mentor_intro or "반가워요!"
+        })
+    
+    return mentors_list
 
 
 # =====================================================================
@@ -457,6 +480,117 @@ def get_mentor_detail(mentor_id: int, db: Session = Depends(get_db)):
         "hashtags": user.hashtags or "",
         "portfolio_url": user.portfolio_url or ""
     }
+
+
+# =====================================================================
+# [신규] 멘토 가용 시간 관련 엔드포인트
+# =====================================================================
+
+@app.get("/api/mentor/availability/{mentor_id}")
+def get_mentor_availability(mentor_id: int, db: Session = Depends(get_db)):
+    """
+    멘토의 전체 가용 시간(available) + 예약 확정(booked) 슬롯을 함께 반환합니다.
+    프론트의 scheduleData 초기값으로 사용합니다.
+    반환 형태: { "2026-05-23": { "09:00": "available", "10:00": "booked" }, ... }
+    """
+    print(f" [가용 시간 조회] Mentor ID: {mentor_id}")
+
+    result: Dict[str, Dict[str, str]] = {}
+
+    # 1) MentorAvailability → available 슬롯
+    availability_rows = db.query(MentorAvailability).filter(
+        MentorAvailability.mentor_id == mentor_id
+    ).all()
+
+    for row in availability_rows:
+        date_key = str(row.date)  # date → "YYYY-MM-DD"
+        if date_key not in result:
+            result[date_key] = {}
+        result[date_key][row.time] = "available"
+
+    # 2) Booking (status=PAID) → booked 슬롯 (available 위에 덮어씀)
+    booking_rows = db.query(Booking).filter(
+        Booking.mentor_id == mentor_id,
+        Booking.status == "PAID"
+    ).all()
+
+    for row in booking_rows:
+        date_key = str(row.booking_date)
+        if date_key not in result:
+            result[date_key] = {}
+        result[date_key][row.booking_time] = "booked"
+
+    print(f" [가용 시간 조회 완료] {len(availability_rows)}개 가용 + {len(booking_rows)}개 예약 반환")
+    return result
+
+
+@app.post("/api/mentor/availability/bulk")
+def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Depends(get_db)):
+    """
+    멘토가 설정한 available 슬롯을 bulk upsert합니다.
+    - 요청에 포함된 날짜는 기존 available 삭제 후 새로 insert (날짜 단위 교체)
+    - booked 슬롯은 Booking 테이블에 있으므로 건드리지 않습니다.
+    """
+    print(f" [가용 시간 저장] Mentor ID: {request.mentor_id}, 날짜 수: {len(request.schedules)}")
+
+    for date_str, times in request.schedules.items():
+        # 해당 날짜의 기존 available 슬롯 삭제
+        db.query(MentorAvailability).filter(
+            MentorAvailability.mentor_id == request.mentor_id,
+            MentorAvailability.date == date_str,
+        ).delete()
+
+        # 새 슬롯 insert
+        for time in times:
+            slot = MentorAvailability(
+                mentor_id=request.mentor_id,
+                date=date_str,
+                time=time,
+            )
+            db.add(slot)
+
+    db.commit()
+    print(f" [가용 시간 저장 완료] Mentor ID: {request.mentor_id}")
+    return {"message": "가용 시간이 저장되었습니다."}
+
+
+@app.post("/api/mentor/penalty")
+def apply_mentor_penalty(request: PenaltyRequest, db: Session = Depends(get_db)):
+    """
+    멘토가 예약 확정(booked) 슬롯을 취소할 때 호출됩니다.
+    - Booking 상태를 CANCELLED로 변경
+    - penalty_applied = True, cancelled_by = "mentor" 기록
+    - MentorAvailability에서 해당 슬롯 삭제
+    """
+    print(f" [패널티 처리] Mentor ID: {request.mentor_id}, {request.date} {request.time}")
+
+    # 해당 예약 조회
+    booking = db.query(Booking).filter(
+        Booking.mentor_id == request.mentor_id,
+        Booking.booking_date == request.date,
+        Booking.booking_time == request.time,
+        Booking.status == "PAID",
+    ).first()
+
+    if not booking:
+        raise HTTPException(status_code=404, detail="해당 예약을 찾을 수 없습니다.")
+
+    # 패널티 처리
+    booking.status = "CANCELLED"
+    booking.penalty_applied = True
+    booking.cancelled_at = datetime.utcnow()
+    booking.cancelled_by = "mentor"
+
+    # MentorAvailability에서도 해당 슬롯 제거
+    db.query(MentorAvailability).filter(
+        MentorAvailability.mentor_id == request.mentor_id,
+        MentorAvailability.date == request.date,
+        MentorAvailability.time == request.time,
+    ).delete()
+
+    db.commit()
+    print(f" [패널티 처리 완료] Booking ID: {booking.id}")
+    return {"message": "예약이 취소되었으며 패널티가 부여되었습니다.", "booking_id": booking.id}
 
 
 # 디버그: 시스템 구동 완료 로그 및 포트 매핑 확인

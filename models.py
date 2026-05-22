@@ -1,5 +1,8 @@
 import enum
-from sqlalchemy import create_engine, Column, Integer, String, Text, Enum, DateTime, Date, func
+from sqlalchemy import (
+    create_engine, Column, Integer, String, Text,
+    Enum, DateTime, Date, Boolean, func, UniqueConstraint  # Boolean, UniqueConstraint 추가
+)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -75,8 +78,37 @@ class Booking(Base):
     booking_date = Column(Date, nullable=False)        
     booking_time = Column(String(50), nullable=False)  
     questions = Column(Text, nullable=False)           
-    status = Column(String(50), default="PAID")        
+    status = Column(String(50), default="PAID")        # PAID | CANCELLED | COMPLETED
     created_at = Column(DateTime, server_default=func.now())
+
+    # [추가] 멘토 귀책 취소(패널티) 관련 컬럼
+    penalty_applied = Column(Boolean, default=False, nullable=False)  # 패널티 부여 여부
+    cancelled_at = Column(DateTime, nullable=True)                    # 취소 처리 시각
+    cancelled_by = Column(String(10), nullable=True)                  # "mentor" | "mentee"
+
+# ==========================================
+# [신규] 멘토 가용 시간 테이블
+# ==========================================
+
+class MentorAvailability(Base):
+    """
+    멘토가 ScheduleManager에서 설정한 '가능 시간' 슬롯을 저장합니다.
+    - 프론트의 'available' 상태 슬롯과 1:1 대응
+    - 멘티가 예약하면 Booking 테이블에 기록되고, 이 테이블의 해당 행은 삭제됩니다.
+    - (mentor_id, date, time) 조합은 유일해야 합니다.
+    """
+    __tablename__ = "mentor_availability"
+    __table_args__ = (
+        UniqueConstraint('mentor_id', 'date', 'time', name='uq_mentor_date_time'),
+        {'schema': 'public'}
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    mentor_id = Column(Integer, nullable=False, index=True)  # Mentor.id 참조
+    date = Column(Date, nullable=False)                      # 예: 2026-05-23
+    time = Column(String(5), nullable=False)                 # 예: "09:00" (HH:MM)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 # ==========================================
 # 3. DB 헬퍼 함수 및 세션 의존성 정의
