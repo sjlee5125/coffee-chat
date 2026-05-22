@@ -56,7 +56,6 @@ class Mentor(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, unique=True, nullable=False) # Users 테이블과 연결고리
     name = Column(String(100), nullable=False)             # 공유 데이터
-    avatar = Column(Text, nullable=True)
     price = Column(String(50), default="10,000 원")
     
     # 💡 새로 설계한 분리형 컬럼들 매핑
