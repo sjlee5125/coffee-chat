@@ -463,20 +463,20 @@ def get_mentors(db: Session = Depends(get_db)):
 # =====================================================================
 @app.get("/api/mentors/{mentor_id}")
 def get_mentor_detail(mentor_id: int, db: Session = Depends(get_db)):
-    # 조인 없이 Mentor 테이블만 단독 조회
     mentor = db.query(Mentor).filter(Mentor.id == mentor_id).first()
     if not mentor:
         raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
     
     return {
         "id": mentor.id,
-        "name": mentor.name, # 💡 이제 멘토가 직접 등록한 이름만 반환합니다.
-        "job_title": mentor.job_title,
-        "mentor_intro": mentor.mentor_intro,
-        "career_history": mentor.career_history,
-        "mentoring_topics": mentor.mentoring_topics,
-        "detailed_experience": mentor.detailed_experience,
-        "profile_image": "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400" # 기본 이미지
+        "name": mentor.name or "멘토",
+        "job_title": mentor.job_title or "직무 미정",
+        "mentor_intro": mentor.mentor_intro or "<p>소개글이 없습니다.</p>",
+        # 💡 None이면 빈 리스트 []를 보내도록 수정
+        "career_history": mentor.career_history or [],
+        "mentoring_topics": mentor.mentoring_topics or [],
+        "detailed_experience": mentor.detailed_experience or [],
+        "profile_image": "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400"
     }
 
 # =====================================================================
