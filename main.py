@@ -407,23 +407,24 @@ async def generate_ai_questions(request: AIQuestionRequest):
 # =====================================================================
 @app.get("/api/mentors")
 def get_mentors(db: Session = Depends(get_db)):
-    """
-    멘토 전체 리스트 조회 API
-    삭제된 mentors.avatar 접근을 완전히 차단하고, User 테이블과 조인하여 실제 프로필 이미지와 이름 데이터를 안전하게 가져옵니다.
-    """
-    print(" [멘토 목록 조회 요청 접수]")
-    results = db.query(Mentor, User).join(User, Mentor.user_id == User.id).all()
+    print(" [멘토 목록 조회 요청 접수] 멘토 전용 필터링 가동")
+    
+    # 🟢 핵심: Mentor.user_id와 User.id가 '둘 다 동시에 존재하는 진짜 멘토 레코드'만 이너조인(결교집합)으로 엄선합니다.
+    results = db.query(Mentor, User).filter(Mentor.user_id == User.id).all()
+    
     return [
         {
             "id": m.id,
             "name": u.name or m.name,
-            "avatar": u.profile_image or "", # 👈 User 테이블의 실제 업로드 이미지 활용
+            "avatar": u.profile_image or "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400", 
             "price": "10,000 원",
-            "job_title": m.job_title or "",
+            "job_title": m.job_title or "커리어 가이드",
+            # 프론트 필터 펑션이 터지지 않도록 기본 가방 규격 바인딩
+            "techStack": (user.hashtags.split(',') if user.hashtags else []) if 'user' in locals() else [],
+            "bio": m.mentor_intro or "반가워요!"
         }
         for m, u in results
     ]
-
 
 # =====================================================================
 # 💡 [정밀 추가] 멘토 개별 상세 조회 API (Undefined Column 에러 근본적 해결)
