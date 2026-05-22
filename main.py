@@ -278,15 +278,16 @@ def get_mentor_details(user_id: int, db: Session = Depends(get_db)):
         
     # 3. 양쪽 테이블의 정보를 통합하여 프론트엔드가 요구하는 포맷으로 반환
     return {
-        "id": user.id,
-        "name": user.name,
-        "profile_image": getattr(user, "profile_image", "") or "",
+        "id": mentor.id,
+        "user_id": mentor.user_id,
+        "name": mentor.name or user.name,
+        "profile_image": user.profile_image or "",
         "job_title": mentor.job_title,
         "career_history": mentor.career_history,
         "mentor_intro": mentor.mentor_intro,
         "mentoring_topics": mentor.mentoring_topics,
         "detailed_experience": mentor.detailed_experience,
-        "price": mentor.price
+        "price": mentor.price or "10,000 원",
     }
 
 
