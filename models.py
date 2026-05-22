@@ -1,16 +1,18 @@
 import enum
-from sqlalchemy import create_engine, Column, Integer, String, Text, Enum, DateTime, func
+from sqlalchemy import create_engine, Column, Integer, String, Text, Enum, DateTime, Date, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import Date
 
-# 1. DB 연결 설정 (우리가 방금 연동 성공한 PostgreSQL 정보로 업데이트)
-# pg_hba.conf를 trust로 설정했기 때문에 password 자리에는 아무 값이나 들어가도 접속됩니다!
+# 1. DB 연결 설정 (PostgreSQL)
 SQLALCHEMY_DATABASE_URL = "postgresql://postgres:password@48.211.169.52:5432/postgres"
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+# ==========================================
+# 2. 공통 ENUM 및 데이터 모델(테이블) 정의
+# ==========================================
 
 class UserRole(enum.Enum):
     MENTOR = "mentor"
@@ -19,20 +21,32 @@ class UserRole(enum.Enum):
 class User(Base):
     __tablename__ = "users"
     __table_args__ = {'schema': 'public'}
+    
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255), unique=True, nullable=False, index=True) 
     name = Column(String(100), nullable=False)                        
-    password_hash = Column(String(255), nullable=True)                 
+    password_hash = Column(String(255), nullable=True)
+    
+    # [추가] 회원가입 시 선택한 유저의 권한/역할 지정
+    role = Column(Enum(UserRole), nullable=True, default=UserRole.MENTEE)
+    
+    # 소셜 로그인 연동 관련 컬럼
     provider = Column(String(50), default="local")                     
     provider_id = Column(String(255), unique=True, nullable=True)      
+   
+    # 프로필 정보 컬럼 세트
     bio = Column(Text, nullable=True)                                  
     mbti = Column(String(4), nullable=True)                            
     hashtags = Column(String(255), nullable=True)                      
     experience = Column(Text, nullable=True)                           
     portfolio_url = Column(Text, nullable=True)                        
-    portfolio_file_path = Column(Text, nullable=True)                                           
+    portfolio_file_path = Column(Text, nullable=True)                  
+    help_provide = Column(Text, nullable=True)                         
     help_receive = Column(Text, nullable=True)                         
-    # 계정 생성일 자동 기록
+    
+    # [추가] 프론트엔드에서 Base64 텍스트로 넘어오는 인코딩된 프로필 이미지 저장
+    profile_image = Column(Text, nullable=True)
+    
     created_at = Column(DateTime, server_default=func.now())
 
 class Mentor(Base):
@@ -40,34 +54,49 @@ class Mentor(Base):
     __table_args__ = {'schema': 'public'}
     
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, unique=True, nullable=False) # Users 테이블과 연동할 ID
-    name = Column(String(100), nullable=False)
-    company = Column(String(100), nullable=False)
-    role = Column(String(100), nullable=False)
+    user_id = Column(Integer, unique=True, nullable=False) # Users 테이블과 연결고리
+    name = Column(String(100), nullable=False)             # 공유 데이터
     avatar = Column(Text, nullable=True)
     price = Column(String(50), default="10,000 원")
+    
+    # 💡 새로 설계한 분리형 컬럼들 매핑
+    job_title = Column(String(100), nullable=True)          # 직무 및 연차 문자열
+    career_history = Column(Text, nullable=True)           # 주요 경력 블록 (JSON 문자열)
+    mentor_intro = Column(Text, nullable=True)             # 성장 스토리 에디터 (HTML 문자열)
+    mentoring_topics = Column(Text, nullable=True)         # 대화 주제 블록 (JSON 문자열)
+    detailed_experience = Column(Text, nullable=True)      # 경험 상세 설명 폼 (JSON 문자열)
 
 class Booking(Base):
     __tablename__ = "bookings"
     __table_args__ = {'schema': 'public'}
     
     id = Column(Integer, primary_key=True, index=True)
-    mentor_id = Column(Integer, nullable=False)        # 예약된 멘토 ID
-    user_id = Column(Integer, nullable=True)          # 예약한 멘티 ID (현재는 선택)
-    booking_date = Column(Date, nullable=False)        # 예약 날짜
-    booking_time = Column(String(50), nullable=False)  # 예약 시간 (예: '09:00 AM')
-    questions = Column(Text, nullable=False)           # 확정된 질문지 내용
-    status = Column(String(50), default="PAID")        # 결제/예약 상태
+    mentor_id = Column(Integer, nullable=False)        
+    user_id = Column(Integer, nullable=True)          
+    booking_date = Column(Date, nullable=False)        
+    booking_time = Column(String(50), nullable=False)  
+    questions = Column(Text, nullable=False)           
+    status = Column(String(50), default="PAID")        
     created_at = Column(DateTime, server_default=func.now())
 
-# DB 테이블 생성 함수
+# ==========================================
+# 3. DB 헬퍼 함수 및 세션 의존성 정의
+# ==========================================
+
 def create_tables():
+    """데이터베이스 유실 없이 새로 추가된 스키마/테이블만 안전하게 생성합니다."""
     Base.metadata.create_all(bind=engine)
 
-# DB 세션 의존성 함수
 def get_db():
+    """FastAPI 엔드포인트에서 공통으로 사용할 DB 세션 제너레이터입니다."""
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
+
+# 스크립트 단독 실행 시 테이블 자동 생성 유도 (인덴트 외부 격리 완료)
+if __name__ == "__main__":
+    print("테이블 구조 변경사항 반영 및 생성 시작...")
+    create_tables()
+    print("테이블 생성 및 동기화 작업 완료!")

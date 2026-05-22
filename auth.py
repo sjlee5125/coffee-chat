@@ -1,70 +1,103 @@
 import os
 from passlib.context import CryptContext
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, APIRouter, Depends
 import requests
-from datetime import datetime, timedelta, timezone # 💡 timezone 추가
-from jose import jwt, JWTError
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from models import User, get_db, UserRole
+from fastapi import APIRouter
+
+router = APIRouter()
 
 # 1. 보안 설정
 SECRET_KEY = "coffee-chat-secret-key" 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
-
-# auth.py 또는 카카오 설정 변수
 KAKAO_CLIENT_ID = "e2eb2fe1d550c2b3da05dcad347a4517"
-# 카카오가 나(리눅스 백엔드)에게 신호를 주도록 설정
 KAKAO_REDIRECT_URI = "http://48.211.169.52:8000/login/kakao/callback"
-print(f"--- 서버 시작: CLIENT_ID={KAKAO_CLIENT_ID} ---")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# --- 일반 로그인 보안 로직 ---
+# Pydantic 모델
+class UserRegisterRequest(BaseModel):
+    email: str
+    password: str
+    role: str
+    name: str
+    bio: str = None
+    mbti: str = None
+    hashtags: str = None
+    experience: str = None
+    portfolio_url: str = None
+    help_provide: str = None
+    help_receive: str = None
+    profile_image: str = None
+
+class UserLoginRequest(BaseModel):
+    email: str
+    password: str
+
+# 2. 인증 유틸리티 함수
 def get_password_hash(password: str):
-    """비밀번호 해싱"""
     return pwd_context.hash(password)
 
 def verify_password(plain_password, hashed_password):
-    """비밀번호 검증"""
     return pwd_context.verify(plain_password, hashed_password)
 
 def create_access_token(data: dict):
-    """서비스 전용 JWT 액세스 토큰 생성"""
     to_encode = data.copy()
-    
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-# --- 카카오 REST API 로직 ---
+# 3. API 엔드포인트
+@router.post("/register", status_code=status.HTTP_201_CREATED)
+def register(request: UserRegisterRequest, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == request.email).first():
+        raise HTTPException(status_code=400, detail="이미 등록된 이메일입니다.")
+    
+    user_role = UserRole.MENTOR if request.role.lower() == "mentor" else UserRole.MENTEE
+    new_user = User(
+        email=request.email,
+        password_hash=get_password_hash(request.password),
+        role=user_role,
+        name=request.name,
+        bio=request.bio,
+        mbti=request.mbti,
+        hashtags=request.hashtags,
+        experience=request.experience,
+        portfolio_url=request.portfolio_url,
+        help_provide=request.help_provide,
+        help_receive=request.help_receive,
+        profile_image=request.profile_image
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    token = create_access_token(data={"sub": new_user.email, "user_id": new_user.id})
+    return {"message": "회원가입 완료", "user_id": new_user.id, "access_token": token}
+
+@router.post("/login")
+def login(request: UserLoginRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == request.email).first()
+    if not user or not verify_password(request.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 틀렸습니다.")
+    
+    token = create_access_token(data={"sub": user.email, "user_id": user.id})
+    return {"access_token": token, "user_id": user.id, "user_name": user.name}
+
+# 4. 카카오 로직
 def get_kakao_token(code: str):
-    """카카오 인가 코드로 액세스 토큰 요청"""
     url = "https://kauth.kakao.com/oauth/token"
-    print(f"DEBUG: 현재 사용 중인 REDIRECT_URI = {KAKAO_REDIRECT_URI}")
-    data = {
-        "grant_type": "authorization_code",
-        "client_id": KAKAO_CLIENT_ID,
-        "redirect_uri": KAKAO_REDIRECT_URI,
-        "code": code,
-    }
-    
+    data = {"grant_type": "authorization_code", "client_id": KAKAO_CLIENT_ID, "redirect_uri": KAKAO_REDIRECT_URI, "code": code}
     response = requests.post(url, data=data)
-    
-    if response.status_code != 200:
-        error_data = response.json()
-        error_msg = error_data.get("error_description", "카카오 토큰 발급 실패")
-        raise HTTPException(status_code=400, detail=f"Kakao API Error: {error_msg}")
-        
+    if response.status_code != 200: raise HTTPException(status_code=400, detail="카카오 토큰 실패")
     return response.json().get("access_token")
 
 def get_kakao_user_info(access_token: str):
-    """액세스 토큰으로 카카오 사용자 정보 조회"""
     url = "https://kapi.kakao.com/v2/user/me"
     headers = {"Authorization": f"Bearer {access_token}"}
     response = requests.get(url, headers=headers)
-    
-    if response.status_code != 200:
-        raise HTTPException(status_code=400, detail="카카오 사용자 정보 조회 실패")
-        
+    if response.status_code != 200: raise HTTPException(status_code=400, detail="카카오 유저 정보 실패")
     return response.json()
