@@ -1,4 +1,5 @@
 import os
+import json
 from datetime import datetime, timedelta, timezone, date
 from urllib.parse import quote
 
@@ -103,6 +104,7 @@ class BookingCreateRequest(BaseModel):
     questions: str
 
 
+# 💡 [스키마 완전 정돈] 프론트엔드가 실어 보내는 변수들과 1:1 대응하도록 스펙 확정
 class MentorRegisterRequest(BaseModel):
     name: str
     job_title: str
@@ -112,6 +114,7 @@ class MentorRegisterRequest(BaseModel):
     detailed_experience: Optional[str] = None
     hashtags: Optional[str] = None
     portfolio_url: Optional[str] = None
+    portfolio_file_path: Optional[str] = None  # 👈 프론트엔드의 attachedFiles 파일명 매핑 칸 확보
 
 
 @app.get("/")
@@ -202,6 +205,7 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
         "hashtags": getattr(user, "hashtags", "") or "",
         "experience": getattr(user, "experience", "") or "",
         "portfolio_url": getattr(user, "portfolio_url", "") or "",
+        "portfolio_file_path": getattr(user, "portfolio_file_path", "") or "",
         "help_provide": getattr(user, "help_provide", "") or "",
         "help_receive": getattr(user, "help_receive", "") or "",
         "profile_image": getattr(user, "profile_image", "") or "",
@@ -233,6 +237,7 @@ def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session
     return {"message": "프로필 정보가 성공적으로 바인딩되었습니다."}
 
 
+# 💡 [정밀 수정 완료 완료] Users 테이블의 관계도 컬럼에 완벽 연동 안착 구역
 @app.post("/api/mentor/register/{user_id}")
 def register_mentor(user_id: int, request: MentorRegisterRequest, db: Session = Depends(get_db)):
     print(f" [분리형 멘토 등록 시작] User ID: {user_id}")
@@ -241,9 +246,11 @@ def register_mentor(user_id: int, request: MentorRegisterRequest, db: Session = 
     if not user:
         raise HTTPException(status_code=404, detail="존재하지 않는 회원 데이터입니다.")
 
+    # 🟢 DBeaver 관계도 컬럼 스펙에 1:1 정밀 바인딩 가동
     user.name = request.name
     user.hashtags = request.hashtags
-    user.portfolio_url = request.portfolio_url
+    user.portfolio_url = request.portfolio_url          # 관계도 스펙 일치
+    user.portfolio_file_path = request.portfolio_file_path  # 관계도 스펙 일치
 
     mentor = db.query(Mentor).filter(Mentor.user_id == user_id).first()
 
@@ -252,6 +259,7 @@ def register_mentor(user_id: int, request: MentorRegisterRequest, db: Session = 
         mentor = Mentor(user_id=user_id)
         db.add(mentor)
 
+    # 🟢 독립 멘토 정보 안정화 매핑
     mentor.name = request.name
     mentor.job_title = request.job_title
     mentor.career_history = request.career_history
@@ -260,7 +268,7 @@ def register_mentor(user_id: int, request: MentorRegisterRequest, db: Session = 
     mentor.detailed_experience = request.detailed_experience
 
     db.commit()
-    print(f" [DB 분리 저장 완료] {user_id}번 유저의 독립형 멘토 프로필 생성 완결")
+    print(f" [DB 분리 저장 완료] {user_id}번 유저의 이름, 링크, 파일경로가 Users 테이블에 영구 저장 완결되었습니다.")
 
     return {"message": "멘토 프로필 독립 등록 완료"}
 
