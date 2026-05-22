@@ -23,7 +23,6 @@ from models import User, Mentor, get_db, create_tables
 # 서버 실행 시 시스템의 .env 환경변수를 로드합니다.
 load_dotenv()
 
-# 데이터 소실 방지를 위해 기존 테이블을 DROP하지 않고, 비어있는 테이블만 안전하게 생성하도록 기동 설정을 주석 처리합니다.
 # create_tables()
 
 app = FastAPI()
@@ -151,9 +150,7 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
     카카오 인증 콜백 수신 엔드포인트
     인가 코드의 중복 사용으로 인한 400 에러 감지 시 이전 가입자 정보를 활용해 무한 로딩 루프를 원천 차단합니다.
     """
-    provider_id = "4893673152"
-    email = None
-    name = "이승재"
+   
 
     try:
         print(" [카카오 콜백 수신] 인가 코드 검증 및 프로세스 가동")
@@ -244,6 +241,35 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
         "help_provide": getattr(user, "help_provide", "") or "",
         "help_receive": getattr(user, "help_receive", "") or "",
         "profile_image": getattr(user, "profile_image", "") or "",
+    }
+
+
+# 💡 [신규 추가] 특정 유저의 분리형 멘토 상세 정보를 조회하는 API
+@app.get("/api/mentor/details/{user_id}")
+def get_mentor_details(user_id: int, db: Session = Depends(get_db)):
+    print(f" [멘토 프로필 상세 조회 요청] User ID: {user_id}")
+    
+    # 1. 공통 정보 추출을 위해 users 테이블 조회
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="존재하지 않는 사용자 회원입니다.")
+        
+    # 2. 독립형 멘토 전용 정보 조회를 위해 mentors 테이블 조회
+    mentor = db.query(Mentor).filter(Mentor.user_id == user_id).first()
+    if not mentor:
+        raise HTTPException(status_code=404, detail="해당 사용자는 멘토로 등록되어 있지 않습니다.")
+        
+    # 3. 양쪽 테이블의 정보를 통합하여 프론트엔드가 요구하는 포맷으로 반환
+    return {
+        "id": user.id,
+        "name": user.name,
+        "profile_image": getattr(user, "profile_image", "") or "",
+        "job_title": mentor.job_title,
+        "career_history": mentor.career_history,
+        "mentor_intro": mentor.mentor_intro,
+        "mentoring_topics": mentor.mentoring_topics,
+        "detailed_experience": mentor.detailed_experience,
+        "price": mentor.price
     }
 
 
