@@ -5,11 +5,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-feature-알림용-종
-
-# 1. DB 연결 설정 (PostgreSQL)
-SQLALCHEMY_DATABASE_URL = "postgresql://postgres:soldesk0526@48.211.169.52:5432/postgres"
-
 import socket
 hostname = socket.gethostname()
 if hostname == "coffeechat":
@@ -18,7 +13,6 @@ if hostname == "coffeechat":
 else:
     # 팀원들 노트북에서는 클라우드 서버 DB로 원격 접속 (외부 IP)
     SQLALCHEMY_DATABASE_URL = "postgresql://postgres:soldesk0526@48.211.169.52:5432/postgres"
-main
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -59,7 +53,7 @@ class User(Base):
     
     # [추가] 프론트엔드에서 Base64 텍스트로 넘어오는 인코딩된 프로필 이미지 저장
     profile_image = Column(Text, nullable=True)
-    phone_number = Column(String(20), nullable=True)
+    
     created_at = Column(DateTime, server_default=func.now())
 
 class Mentor(Base):
@@ -119,7 +113,6 @@ class MentorAvailability(Base):
     time = Column(String(5), nullable=False)                 # 예: "09:00" (HH:MM)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
 
 # ==========================================
 # 3. DB 헬퍼 함수 및 세션 의존성 정의
