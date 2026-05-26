@@ -7,7 +7,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
 # 1. DB 연결 설정 (PostgreSQL)
-SQLALCHEMY_DATABASE_URL = "postgresql://postgres:soldesk0526@48.211.169.52:5432/postgres"
+SQLALCHEMY_DATABASE_URL = "postgresql://postgres:soldesk0526@localhost:5432/postgres"
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -61,11 +61,11 @@ class Mentor(Base):
     price = Column(String(50), default="10,000 원")
     
     # 💡 새로 설계한 분리형 컬럼들 매핑
-    job_title = Column(String(100), nullable=True)          # 직무 및 연차 문자열
-    career_history = Column(Text, nullable=True)           # 주요 경력 블록 (JSON 문자열)
-    mentor_intro = Column(Text, nullable=True)             # 성장 스토리 에디터 (HTML 문자열)
-    mentoring_topics = Column(Text, nullable=True)         # 대화 주제 블록 (JSON 문자열)
-    detailed_experience = Column(Text, nullable=True)      # 경험 상세 설명 폼 (JSON 문자열)
+    job_title = Column(String(100), nullable=True)          
+    career_history = Column(Text, nullable=True)           # 주요 경력  
+    mentor_intro = Column(Text, nullable=True)             # 성장 스토리 에
+    mentoring_topics = Column(Text, nullable=True)         # 대화 주제 
+    detailed_experience = Column(Text, nullable=True)      # 경험 상세 
 
 class Booking(Base):
     __tablename__ = "bookings"
@@ -77,7 +77,7 @@ class Booking(Base):
     booking_date = Column(Date, nullable=False)        
     booking_time = Column(String(50), nullable=False)  
     questions = Column(Text, nullable=False)           
-    status = Column(String(50), default="PAID")        # PAID | CANCELLED | COMPLETED
+    status = Column(String(50), default="PAID")        
     created_at = Column(DateTime, server_default=func.now())
 
     # [추가] 멘토 귀책 취소(패널티) 관련 컬럼
