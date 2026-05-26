@@ -7,8 +7,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
 # 1. DB 연결 설정 (PostgreSQL)
-SQLALCHEMY_DATABASE_URL = "postgresql://postgres:password@48.211.169.52:5432/postgres"
-
+SQLALCHEMY_DATABASE_URL = "postgresql://postgres:soldesk0526@48.211.169.52:5432/postgres"
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
