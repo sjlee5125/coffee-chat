@@ -23,7 +23,7 @@ from models import User, Mentor, Booking, MentorAvailability, get_db, create_tab
 # 서버 실행 시 시스템의 .env 환경변수를 로드합니다.
 load_dotenv()
 
-#create_tables()
+create_tables()
 
 app = FastAPI()
 
