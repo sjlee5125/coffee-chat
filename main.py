@@ -342,7 +342,7 @@ def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session
     db.commit()
     print(f" [DB 반영 성공] 유저 {user_id}번 프로필 영구 업데이트 저장 완료")
     print("🚨 [CCTV 3] DB 저장 완료!")
-    return {"message": "프로필 정보가 성공적으로 바인딩되었습니다."}
+    return {"message": "전화번호까지 완벽하게 찐으로 저장되었습니다!!!"}
 
 
 @app.post("/api/mentor/register/{user_id}")
