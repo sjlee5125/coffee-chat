@@ -264,39 +264,30 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
         "profile_image": getattr(user, "profile_image", "") or "",
         "phone_number": getattr(user, "phone_number", "") or "",
     }
-
-
-# =====================================================================
-# [신규] 멘토 가용 시간 관련 엔드포인트
-# =====================================================================
-
 @app.get("/api/mentor/availability/{mentor_id}")
 def get_mentor_availability(mentor_id: int, db: Session = Depends(get_db)):
-    # 1. 멘토 확인 (user_id로 먼저, 없으면 mentor.id로)
-    mentor = db.query(Mentor).filter(Mentor.user_id == mentor_id).first()
+    # 🟢 프론트가 준 ID가 mentors 테이블의 진짜 PK(id)라고 가정하고 다이렉트 조회
+    mentor = db.query(Mentor).filter(Mentor.id == mentor_id).first()
+    
+    # 만약 그런 멘토가 DB에 아예 없으면 리액트 터지지 않게 빈 배열/객체 리턴
     if not mentor:
-        mentor = db.query(Mentor).filter(Mentor.id == mentor_id).first()
-        
-    # 💡 [정밀 수정] 멘토 등록이 안 된 유저를 위해 404를 지우고 빈 중괄호({}) 리턴으로 우회 안전 가드
-    if not mentor:
-        print(f" [알림] {mentor_id}번에 해당하는 멘토가 없어 빈 가용 스케줄 리스트를 전달합니다.")
         return {}
 
-    # 2. 오늘 이후 슬롯만 조회 (성능 최적화)
     today = date.today()
 
+    # 🟢 가용 시간과 예약 내역 모두 mentor.id (진짜 멘토 PK) 기준으로만 깔끔하게 쿼리!
     availability_rows = db.query(MentorAvailability).filter(
         MentorAvailability.mentor_id == mentor.id,
-        MentorAvailability.date >= today  # ✅ 오늘 포함 이후만
+        MentorAvailability.date >= today
     ).all()
 
     booking_rows = db.query(Booking).filter(
         Booking.mentor_id == mentor.id,
-        Booking.booking_date >= today,    # ✅ 오늘 포함 이후만
+        Booking.booking_date >= today,
         Booking.status == "PAID"
     ).all()
 
-    # 3. 프론트 형태에 맞게 { "YYYY-MM-DD": { "HH:MM": "available/booked" } } 로 조립
+    # 프론트 포맷에 맞게 조립 { "YYYY-MM-DD": { "HH:MM": "available/booked" } }
     result: Dict[str, Dict[str, str]] = {}
 
     for row in availability_rows:
@@ -309,7 +300,7 @@ def get_mentor_availability(mentor_id: int, db: Session = Depends(get_db)):
         date_key = str(row.booking_date)
         if date_key not in result:
             result[date_key] = {}
-        result[date_key][row.booking_time] = "booked"  # ✅ available 위에 덮어씌움
+        result[date_key][row.booking_time] = "booked"
 
     return result
 
