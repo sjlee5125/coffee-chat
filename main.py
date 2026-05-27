@@ -301,21 +301,23 @@ def get_mentor_availability(mentor_id: int, db: Session = Depends(get_db)):
     mentor = db.query(Mentor).filter(Mentor.id == mentor_id).first()
     if not mentor:
         mentor = db.query(Mentor).filter(Mentor.user_id == mentor_id).first()
-    
+
     if not mentor:
         raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
 
     today = date.today()
 
+    # 💡 [핵심 수정] 멘토 고유 PK(6)로 저장되었든, 유저 ID(13)로 저장되었든 양쪽 다 가져오도록 가드 확장!
     availability_rows = db.query(MentorAvailability).filter(
-        MentorAvailability.mentor_id == mentor.id,
+        (MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id),
         MentorAvailability.date >= today
     ).all()
 
     print(f" [디버그] 조회된 availability 슬롯 수: {len(availability_rows)}")
 
+    # 💡 예약 내역 조회도 동일하게 양쪽 ID 체계를 모두 교차 지원하도록 가드를 확장합니다.
     booking_rows = db.query(Booking).filter(
-        Booking.mentor_id == mentor.id,
+        (Booking.mentor_id == mentor.id) | (Booking.mentor_id == mentor.user_id),
         Booking.booking_date >= today,
         Booking.status == "PAID"
     ).all()
