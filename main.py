@@ -221,10 +221,11 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
         safe_email = quote(user.email)
 
         if is_new_user:
-            frontend_url = f"http://localhost:5173/profile-setup?token={access_token}&name={safe_name}&email={safe_email}&id={user.id}"
-            print(f" [리다이렉트] 신규회원 진입 완료: {frontend_url}")
+    # str(user.id)로 명확하게 감싸서 순수한 숫자만 주소창에 넘기도록 가드
+            frontend_url = f"http://localhost:5173/profile-setup?token={access_token}&name={quote(user.name)}&email={quote(user.email)}&id={str(user.id)}"
         else:
-            frontend_url = f"http://localhost:5173/?token={access_token}&name={safe_name}"
+            # 기존 유저가 로그인할 때도 프론트엔드가 userId를 갱신할 수 있도록 주소창 뒤에 id를 확실하게 붙여줍니다.
+            frontend_url = f"http://localhost:5173/?token={access_token}&name={quote(user.name)}&id={str(user.id)}"
             print(f" [리다이렉트] 기존 진짜 회원 로그인 완료: {frontend_url}")
 
         return RedirectResponse(url=frontend_url, status_code=status.HTTP_302_FOUND)
