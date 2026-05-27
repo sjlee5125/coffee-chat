@@ -2,7 +2,7 @@ import os
 import json
 from datetime import datetime, timedelta, timezone, date
 from urllib.parse import quote
-
+import asyncio
 from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
@@ -113,8 +113,8 @@ class AIQuestionRequest(BaseModel):
 
 
 class BookingCreateRequest(BaseModel):
-    """커피챗 예약 생성 시 수신할 요청 데이터 명세"""
     mentorId: int
+    userId: int   # 💡 추가
     date: date
     time: str
     questions: str
@@ -301,19 +301,17 @@ def get_mentor_availability(mentor_id: int, db: Session = Depends(get_db)):
     mentor = db.query(Mentor).filter(Mentor.id == mentor_id).first()
     if not mentor:
         mentor = db.query(Mentor).filter(Mentor.user_id == mentor_id).first()
-
+    
     if not mentor:
         raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
 
     today = date.today()
 
-    # 💡 [핵심 수정] 멘토 고유 PK(6)로 저장되었든, 유저 ID(13)로 저장되었든 양쪽 다 가져오도록 가드 확장!
+    # 💡 [교정 핵심] mentor_id(6번)나 user_id(13번) 둘 중 어떤 것으로 저장되어 있든 상관없이 다 긁어오도록 OR(|) 필터 지정!
     availability_rows = db.query(MentorAvailability).filter(
         (MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id),
         MentorAvailability.date >= today
     ).all()
-
-    print(f" [디버그] 조회된 availability 슬롯 수: {len(availability_rows)}")
 
     # 💡 예약 내역 조회도 동일하게 양쪽 ID 체계를 모두 교차 지원하도록 가드를 확장합니다.
     booking_rows = db.query(Booking).filter(
@@ -335,7 +333,7 @@ def get_mentor_availability(mentor_id: int, db: Session = Depends(get_db)):
         date_key = str(row.booking_date)
         if date_key not in result:
             result[date_key] = {}
-        result[date_key][row.booking_time] = "booked"  # ✅ available 위에 덮어씌움
+        result[date_key][row.booking_time] = "booked"
 
     return result
 
@@ -587,6 +585,7 @@ def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db))
     # 3. 예약 생성
     booking = Booking(
         mentor_id=mentor.id,
+        user_id=request.userId, # 💡 추가
         booking_date=request.date,
         booking_time=request.time,
         questions=request.questions,
@@ -605,7 +604,12 @@ def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db))
     db.refresh(booking)
     print(f" [예약 생성 완료] Booking ID: {booking.id}")
     return {"message": "예약이 완료되었습니다.", "booking_id": booking.id}
+    asyncio.create_task(manager.send_personal_message(
+        {"type": "NEW_NOTIFICATION", "message": "🎉 새로운 커피챗 예약 요청이 도착했습니다!"}, 
+        mentor.user_id
+    ))
 
+    return {"message": "예약이 완료되었습니다.", "booking_id": booking.id}
 
 # =====================================================================
 # 💡 [신규/보완] 멘토 가용 시간 Bulk 저장 (ID 꼬임 완전 방지 가드 탑재)
