@@ -297,33 +297,30 @@ def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Dep
 
 @app.get("/api/mentor/availability/{mentor_id}")
 def get_mentor_availability(mentor_id: int, db: Session = Depends(get_db)):
-    # 1. 인입된 인자가 멘토 PK(id)이든 유저 ID(user_id)이든 상관없이 멘토 엔티티를 단 한 줄로 확실하게 컷 조인합니다.
+    # 1. 멘토 타겟팅 (PK 및 유저 ID 모두 호환)
     mentor = db.query(Mentor).filter((Mentor.id == mentor_id) | (Mentor.user_id == mentor_id)).first()
-    if not mentor: 
+    if not mentor:
         raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
 
-    today = date.today()
-    
-    # 2. 일정 관리 테이블(MentorAvailability)에 저장된 mentor_id가 어떤 ID 체계이든 다 안전하게 긁어옵니다.
+    # 💡 [핵심 교정] date >= today 조건을 과감히 삭제하여, 
+    # 프론트엔드 달력이 과거 일정을 포함한 한 달 치 데이터를 온전히 렌더링할 수 있도록 빗장을 풉니다.
     availability_rows = db.query(MentorAvailability).filter(
-        (MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id),
-        MentorAvailability.date >= today
+        (MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id)
     ).all()
 
-    # 3. 예약 테이블(Bookings)은 models.py 명세에 따라 명확히 mentors.id 또는 users.id 교차 지원을 조회합니다.
     booking_rows = db.query(Booking).filter(
         (Booking.mentor_id == mentor.id) | (Booking.mentor_id == mentor.user_id),
-        Booking.booking_date >= today,
         Booking.status == "PAID"
     ).all()
 
-    # 4. 데이터 조립 구조 표준화
     result: Dict[str, Dict[str, str]] = {}
+
     for row in availability_rows:
         dk = str(row.date)
         if dk not in result: result[dk] = {}
         result[dk][row.time] = "available"
 
+    # 예약된 슬롯은 available을 덮어쓰도록 후순위 배치
     for row in booking_rows:
         dk = str(row.booking_date)
         if dk not in result: result[dk] = {}
@@ -611,25 +608,19 @@ def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db))
 # =====================================================================
 # 💡 [신규/보완] 멘토 가용 시간 Bulk 저장 (ID 꼬임 완전 방지 가드 탑재)
 # =====================================================================
-@app.post("/api/mentor/availability/bulk")
 def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Depends(get_db)):
-    print(f" [가용 시간 bulk 저장 시작] 수신된 ID 파라미터: {request.mentor_id}")
-
-    # 인입된 ID가 유저 ID일지, 멘토 ID일지 모르기 때문에 둘 다 교차 검증을 가동합니다.
-    mentor = db.query(Mentor).filter(Mentor.id == request.mentor_id).first()
-    if not mentor:
-        mentor = db.query(Mentor).filter(Mentor.user_id == request.mentor_id).first()
-        
+    # 1. 멘토 타겟팅
+    mentor = db.query(Mentor).filter((Mentor.id == request.mentor_id) | (Mentor.user_id == request.mentor_id)).first()
     if not mentor:
         raise HTTPException(status_code=404, detail="등록된 멘토 프로필을 찾을 수 없습니다.")
 
-    # 멘토의 진짜 고유 고정 PK(id)를 기준으로 가용 시간 데이터를 인서트합니다.
     real_mentor_id = mentor.id
 
     for date_str, times in request.schedules.items():
-        # 기존 해당 날짜 슬롯을 클리어 한 후 재인서트 (Upsert 구현)
+        # 💡 [핵심 교정] 기존에 잘못 섞여 들어간 user_id 기준의 가용 시간 데이터까지 
+        # 양방향 필터로 싹 긁어서 완벽하게 삭제(Clear)한 뒤 새로운 슬롯을 덮어씁니다.
         db.query(MentorAvailability).filter(
-            MentorAvailability.mentor_id == real_mentor_id,
+            (MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id),
             MentorAvailability.date == date_str,
         ).delete()
 
@@ -642,7 +633,7 @@ def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Dep
             db.add(slot)
 
     db.commit()
-    print(f" [성공] 멘토 {mentor.name} (PK: {real_mentor_id}) 가용 일정 bulk 덤프 완료")
+    print(f" [가용 시간 저장 완료] Mentor PK: {real_mentor_id}의 일정 동기화 성공")
     return {"message": "가용 시간이 성공적으로 저장되었습니다."}
 
 
