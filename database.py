@@ -10,7 +10,6 @@ else:
     # 팀원들 노트북에서는 클라우드 서버 DB로 원격 접속 (외부 IP)
     SQLALCHEMY_DATABASE_URL = "postgresql://postgres:soldesk0526@48.211.169.52:5432/postgres"
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
-
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
