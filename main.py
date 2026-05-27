@@ -296,24 +296,26 @@ def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Dep
 
 @app.get("/api/mentor/availability/{mentor_id}")
 def get_mentor_availability(mentor_id: int, db: Session = Depends(get_db)):
-    # 1. 멘토 확인 (user_id로 먼저, 없으면 mentor.id로)
-    mentor = db.query(Mentor).filter(Mentor.user_id == mentor_id).first()
+    # 1. 멘토 고유 일련번호(id)로 먼저 찾고, 없으면 호환성을 위해 user_id 매핑 체킹
+    mentor = db.query(Mentor).filter(Mentor.id == mentor_id).first()
     if not mentor:
-        mentor = db.query(Mentor).filter(Mentor.id == mentor_id).first()
+        mentor = db.query(Mentor).filter(Mentor.user_id == mentor_id).first()
+    
     if not mentor:
         raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
 
-    # 2. 오늘 이후 슬롯만 조회 (성능 최적화)
     today = date.today()
 
     availability_rows = db.query(MentorAvailability).filter(
         MentorAvailability.mentor_id == mentor.id,
-        MentorAvailability.date >= today  # ✅ 오늘 포함 이후만
+        MentorAvailability.date >= today
     ).all()
+
+    print(f" [디버그] 조회된 availability 슬롯 수: {len(availability_rows)}")
 
     booking_rows = db.query(Booking).filter(
         Booking.mentor_id == mentor.id,
-        Booking.booking_date >= today,    # ✅ 오늘 포함 이후만
+        Booking.booking_date >= today,
         Booking.status == "PAID"
     ).all()
 
@@ -560,10 +562,12 @@ def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db))
     """멘티의 커피챗 예약 생성 API"""
     print(f" [예약 생성 요청] mentor_id={request.mentorId}, date={request.date}, time={request.time}")
 
-    # 1. 멘토 확인 (user_id로 먼저, 없으면 mentor.id로)
-    mentor = db.query(Mentor).filter(Mentor.user_id == request.mentorId).first()
+    # 1. mentors 테이블의 고유 id(PK)로 멘토 엔티티를 정밀 타겟팅합니다.
+    mentor = db.query(Mentor).filter(Mentor.id == request.mentorId).first()
     if not mentor:
-        mentor = db.query(Mentor).filter(Mentor.id == request.mentorId).first()
+        # 프론트가 혹시 user_id를 보냈을 경우를 대비한 유연한 2차 가드 필터링
+        mentor = db.query(Mentor).filter(Mentor.user_id == request.mentorId).first()
+    
     if not mentor:
         raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
 
@@ -598,6 +602,44 @@ def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db))
     db.refresh(booking)
     print(f" [예약 생성 완료] Booking ID: {booking.id}")
     return {"message": "예약이 완료되었습니다.", "booking_id": booking.id}
+
+
+# =====================================================================
+# 💡 [신규/보완] 멘토 가용 시간 Bulk 저장 (ID 꼬임 완전 방지 가드 탑재)
+# =====================================================================
+@app.post("/api/mentor/availability/bulk")
+def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Depends(get_db)):
+    print(f" [가용 시간 bulk 저장 시작] 수신된 ID 파라미터: {request.mentor_id}")
+
+    # 인입된 ID가 유저 ID일지, 멘토 ID일지 모르기 때문에 둘 다 교차 검증을 가동합니다.
+    mentor = db.query(Mentor).filter(Mentor.id == request.mentor_id).first()
+    if not mentor:
+        mentor = db.query(Mentor).filter(Mentor.user_id == request.mentor_id).first()
+        
+    if not mentor:
+        raise HTTPException(status_code=404, detail="등록된 멘토 프로필을 찾을 수 없습니다.")
+
+    # 멘토의 진짜 고유 고정 PK(id)를 기준으로 가용 시간 데이터를 인서트합니다.
+    real_mentor_id = mentor.id
+
+    for date_str, times in request.schedules.items():
+        # 기존 해당 날짜 슬롯을 클리어 한 후 재인서트 (Upsert 구현)
+        db.query(MentorAvailability).filter(
+            MentorAvailability.mentor_id == real_mentor_id,
+            MentorAvailability.date == date_str,
+        ).delete()
+
+        for time_str in times:
+            slot = MentorAvailability(
+                mentor_id=real_mentor_id,
+                date=date_str,
+                time=time_str,
+            )
+            db.add(slot)
+
+    db.commit()
+    print(f" [성공] 멘토 {mentor.name} (PK: {real_mentor_id}) 가용 일정 bulk 덤프 완료")
+    return {"message": "가용 시간이 성공적으로 저장되었습니다."}
 
 
 @app.post("/api/mentor/penalty")
