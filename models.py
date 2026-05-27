@@ -73,8 +73,8 @@ class Booking(Base):
     __table_args__ = {'schema': 'public'}
     
     id = Column(Integer, primary_key=True, index=True)
-    mentor_id = Column(Integer, ForeignKey("mentors.id"))
-    user_id = Column(Integer, ForeignKey("users.id"))
+    mentor_id = Column(Integer, ForeignKey("public.mentors.id")) # 💡 public. 추가
+    user_id = Column(Integer, ForeignKey("public.users.id"))     # 💡 public. 추가
     booking_date = Column(Date)
     booking_time = Column(String)
     questions = Column(String)
