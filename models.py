@@ -1,7 +1,7 @@
 import enum
 from sqlalchemy import (
     create_engine, Column, Integer, String, Text,
-    Enum, DateTime, Foreignkey, Date, Boolean, func, UniqueConstraint  # Boolean, UniqueConstraint 추가
+    Enum, DateTime, ForeignKey, Date, Boolean, func, UniqueConstraint  # Boolean, UniqueConstraint 추가
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
