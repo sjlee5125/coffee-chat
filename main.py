@@ -159,7 +159,14 @@ class PenaltyRequest(BaseModel):
     time: str   # "09:00"
     reason: str
 
+class Notification(Base):
+    __tablename__ = "notifications"
 
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id")) # 이 알림을 받을 주인의 ID
+    message = Column(String(255))                     # 알림 내용 (예: "ㅇㅇㅇ님이 커피챗을 신청했습니다.")
+    is_read = Column(Boolean, default=False)          # 읽음 여부 (False면 종에 빨간 점 띄움!)
+    created_at = Column(DateTime, default=datetime.utcnow) # 알림이 온 시간
 # --- [API 라우터 비즈니스 로직 구역] ---
 
 @app.get("/")

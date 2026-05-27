@@ -1,10 +1,11 @@
 import enum
 from sqlalchemy import (
     create_engine, Column, Integer, String, Text,
-    Enum, DateTime, Date, Boolean, func, UniqueConstraint  # Boolean, UniqueConstraint 추가
+    Enum, ForeignKey, DateTime, Date, Boolean, func, UniqueConstraint  # Boolean, UniqueConstraint 추가
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from datetime import datetime
 
 # 1. DB 연결 설정 (PostgreSQL)
 import socket
@@ -92,6 +93,15 @@ class Booking(Base):
     cancelled_at = Column(DateTime, nullable=True)                    # 취소 처리 시각
     cancelled_by = Column(String(10), nullable=True)                  # "mentor" | "mentee"
 
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id")) # 이 알림을 받을 주인의 ID
+    message = Column(String(255))                     # 알림 내용 (예: "ㅇㅇㅇ님이 커피챗을 신청했습니다.")
+    is_read = Column(Boolean, default=False)          # 읽음 여부 (False면 종에 빨간 점 띄움!)
+    created_at = Column(DateTime, default=datetime.utcnow) # 알림이 온 시간
+    
 # ==========================================
 # [신규] 멘토 가용 시간 테이블
 # ==========================================
