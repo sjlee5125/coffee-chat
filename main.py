@@ -108,6 +108,7 @@ class ProfileUpdateRequest(BaseModel):
     help_provide: Optional[str] = None
     help_receive: Optional[str] = None
     profile_image: Optional[str] = None
+    phone_number: Optional[str] = None
 
 
 class AIQuestionRequest(BaseModel):
