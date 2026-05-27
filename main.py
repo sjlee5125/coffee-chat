@@ -715,7 +715,36 @@ def get_user_notifications(db: Session = Depends(get_db)):
         return []
     except Exception:
         return []
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[int, WebSocket] = {}
 
+    async def connect(self, user_id: int, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections[user_id] = websocket
+        print(f"📡 [WebSocket 연결 성공] User ID: {user_id}")
+
+    def disconnect(self, user_id: int):
+        if user_id in self.active_connections:
+            del self.active_connections[user_id]
+            print(f"🔌 [WebSocket 연결 해제] User ID: {user_id}")
+
+    async def send_personal_message(self, message: dict, user_id: int):
+        if user_id in self.active_connections:
+            await self.active_connections[user_id].send_json(message)
+
+manager = ConnectionManager()
+
+@app.websocket("/ws/notifications/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, user_id: int):
+    """프론트엔드와 1:1로 실시간 알림 파이프라인을 유지하는 웹소켓 채널"""
+    await manager.connect(user_id, websocket)
+    try:
+        while True:
+            # 브라우저가 살아있는지 체크하기 위해 하트비트 대기 상태 유지
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(user_id)
 if __name__ == "__main__":
     import uvicorn
     
