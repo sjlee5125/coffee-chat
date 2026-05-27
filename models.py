@@ -1,14 +1,12 @@
 import enum
 from sqlalchemy import (
     create_engine, Column, Integer, String, Text,
-    Enum, ForeignKey, DateTime, Date, Boolean, func, UniqueConstraint  # Boolean, UniqueConstraint 추가
+    Enum, DateTime, Date, Boolean, func, UniqueConstraint  # Boolean, UniqueConstraint 추가
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 
-# 1. DB 연결 설정 (PostgreSQL)
-SQLALCHEMY_DATABASE_URL = "postgresql://postgres:soldesk0526@48.211.169.52:5432/postgres"
 import socket
 hostname = socket.gethostname()
 if hostname == "coffeechat":
@@ -125,7 +123,7 @@ class MentorAvailability(Base):
     mentor_id = Column(Integer, nullable=False, index=True)  # Mentor.id 참조
     date = Column(Date, nullable=False)                      # 예: 2026-05-23
     time = Column(String(5), nullable=False)                 # 예: "09:00" (HH:MM)
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 # ==========================================
@@ -135,6 +133,21 @@ class MentorAvailability(Base):
 def create_tables():
     """데이터베이스 유실 없이 새로 추가된 스키마/테이블만 안전하게 생성합니다."""
     Base.metadata.create_all(bind=engine)
+
+# ==========================================
+# [신규] 종 모양 알림(Notification) 테이블
+# ==========================================
+class Notification(Base):
+    __tablename__ = "notifications"
+    __table_args__ = {'schema': 'public'}
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False, index=True) # 알림을 받을 유저 ID
+    message = Column(String(255), nullable=False)         # 알림 내용
+    is_read = Column(Boolean, default=False)              # 읽음 여부 (False면 빨간불!)
+    
+    # 💡 datetime.utcnow 로 완벽하게 수정 완료!
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 def get_db():
     """FastAPI 엔드포인트에서 공통으로 사용할 DB 세션 제너레이터입니다."""
