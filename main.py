@@ -700,7 +700,18 @@ def get_mentor_summary(mentor_id: int, db: Session = Depends(get_db)):
 print(f"--- [DEBUG] 현재 등록된 라우터 개수: {len(app.routes)} ---")
 for route in app.routes:
     print(f"DEBUG: 경로 정보 -> {route.path} | {getattr(route, 'methods', 'N/A')}")
-
+@app.get("/api/notifications")
+def get_user_notifications(db: Session = Depends(get_db)):
+    """
+    프론트엔드 헤더가 토큰을 실어서 10초마다 찌르는 알림 요청을 받아줍니다.
+    아직 알림 비즈니스 로직 연동 전이므로, 프론트가 터지지 않게 빈 배열([])을 안전하게 반환합니다.
+    """
+    try:
+        from models import Notification
+        # 404 폭탄을 막기 위해 우선 빈 리스트로 리턴하여 200 OK를 만들어줍니다.
+        return []
+    except Exception:
+        return []
 
 if __name__ == "__main__":
     import uvicorn
