@@ -2,6 +2,7 @@ import os
 import json
 from datetime import datetime, timedelta, timezone, date
 from urllib.parse import quote
+import base64
 import asyncio
 from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +12,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict, List
 from dotenv import load_dotenv
 from openai import AzureOpenAI
+from fastapi import Header
 
 import auth
 
@@ -707,48 +709,75 @@ def get_mentor_summary(mentor_id: int, db: Session = Depends(get_db)):
 print(f"--- [DEBUG] 현재 등록된 라우터 개수: {len(app.routes)} ---")
 for route in app.routes:
     print(f"DEBUG: 경로 정보 -> {route.path} | {getattr(route, 'methods', 'N/A')}")
+
+# =====================================================================
+# 🔔 [알림 API 1] 내 알림 목록 실시간 조회 (더미 API ➔ 진짜 API로 교체!)
+# =====================================================================
 @app.get("/api/notifications")
-def get_user_notifications(db: Session = Depends(get_db)):
-    """
-    프론트엔드 헤더가 토큰을 실어서 10초마다 찌르는 알림 요청을 받아줍니다.
-    아직 알림 비즈니스 로직 연동 전이므로, 프론트가 터지지 않게 빈 배열([])을 안전하게 반환합니다.
-    """
+def get_user_notifications(Authorization: str = Header(None), db: Session = Depends(get_db)):
+    """프론트엔드 헤더가 10초마다 요청하는 진짜 실시간 알림 조회 API"""
+    if not Authorization:
+        return []
+    
     try:
         from models import Notification
-        # 404 폭탄을 막기 위해 우선 빈 리스트로 리턴하여 200 OK를 만들어줍니다.
+        
+        # 1. Bearer 토큰에서 진짜 토큰 글자만 추출
+        token = Authorization.replace("Bearer ", "")
+        
+        # 2. 💡 라이브러리 충돌(jwt 에러)을 막기 위해 Base64로 페이로드(내용)만 100% 안전하게 디코딩
+        payload_b64 = token.split('.')[1]
+        payload_b64 += '=' * (4 - len(payload_b64) % 4) # Base64 패딩 처리
+        payload = json.loads(base64.b64decode(payload_b64).decode('utf-8'))
+        
+        user_id = payload.get("user_id")
+        if not user_id:
+            return []
+
+        # 3. 내 유저 ID로 온 알림을 최신순으로 가져오기 (최근 20개까지만!)
+        notifications = db.query(Notification).filter(
+            Notification.user_id == user_id
+        ).order_by(Notification.created_at.desc()).limit(20).all()
+        
+        # 4. 프론트가 딱 원하는 모양으로 포장해서 반환
+        return [
+            {
+                "id": n.id,
+                "message": n.message,
+                "is_read": n.is_read,
+                # 날짜를 프론트가 읽기 편한 문자열로 변환
+                "created_at": n.created_at.isoformat() if n.created_at else None 
+            }
+            for n in notifications
+        ]
+    except Exception as e:
+        print(f"❌ [알림 조회 에러]: {e}")
         return []
-    except Exception:
-        return []
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: Dict[int, WebSocket] = {}
 
-    async def connect(self, user_id: int, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections[user_id] = websocket
-        print(f"📡 [WebSocket 연결 성공] User ID: {user_id}")
 
-    def disconnect(self, user_id: int):
-        if user_id in self.active_connections:
-            del self.active_connections[user_id]
-            print(f"🔌 [WebSocket 연결 해제] User ID: {user_id}")
-
-    async def send_personal_message(self, message: dict, user_id: int):
-        if user_id in self.active_connections:
-            await self.active_connections[user_id].send_json(message)
-
-manager = ConnectionManager()
-
-@app.websocket("/ws/notifications/{user_id}")
-async def websocket_endpoint(websocket: WebSocket, user_id: int):
-    """프론트엔드와 1:1로 실시간 알림 파이프라인을 유지하는 웹소켓 채널"""
-    await manager.connect(user_id, websocket)
+# =====================================================================
+# 🔔 [알림 API 2] 알림 클릭 시 빨간불 끄기 (읽음 처리)
+# =====================================================================
+@app.put("/api/notifications/{notification_id}/read")
+def mark_notification_as_read(notification_id: int, db: Session = Depends(get_db)):
+    """알림 드롭다운에서 특정 알림을 클릭했을 때 읽음(is_read=True) 처리하는 API"""
     try:
-        while True:
-            # 브라우저가 살아있는지 체크하기 위해 하트비트 대기 상태 유지
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        manager.disconnect(user_id)
+        from models import Notification
+        
+        # 1. 클릭한 그 알림을 DB에서 찾기
+        notif = db.query(Notification).filter(Notification.id == notification_id).first()
+        if not notif:
+            raise HTTPException(status_code=404, detail="알림을 찾을 수 없습니다.")
+        
+        # 2. 빨간불 끄기! (DB에 저장)
+        notif.is_read = True
+        db.commit()
+        
+        return {"message": "성공적으로 읽음 처리되었습니다."}
+        
+    except Exception as e:
+        print(f"❌ [알림 읽음 처리 에러]: {e}")
+        raise HTTPException(status_code=500, detail="알림 처리 중 오류가 발생했습니다.")
 if __name__ == "__main__":
     import uvicorn
     
