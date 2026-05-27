@@ -7,7 +7,14 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
 # 1. DB 연결 설정 (PostgreSQL)
-SQLALCHEMY_DATABASE_URL = "postgresql://postgres:soldesk0526@localhost:5432/postgres"
+import socket
+hostname = socket.gethostname()
+if hostname == "coffeechat":
+    # 클라우드 서버 내부에서는 옆방 DB로 바로 접속 (localhost)
+    SQLALCHEMY_DATABASE_URL = "postgresql://postgres:soldesk0526@localhost:5432/postgres"
+else:
+    # 팀원들 노트북에서는 클라우드 서버 DB로 원격 접속 (외부 IP)
+    SQLALCHEMY_DATABASE_URL = "postgresql://postgres:soldesk0526@48.211.169.52:5432/postgres"
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -22,7 +29,7 @@ class UserRole(enum.Enum):
 
 class User(Base):
     __tablename__ = "users"
-    __table_args__ = {'schema': 'public'}
+    
     
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255), unique=True, nullable=False, index=True) 
@@ -53,7 +60,7 @@ class User(Base):
 
 class Mentor(Base):
     __tablename__ = "mentors"
-    __table_args__ = {'schema': 'public'}
+  
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, unique=True, nullable=False) # Users 테이블과 연결고리
@@ -69,7 +76,7 @@ class Mentor(Base):
 
 class Booking(Base):
     __tablename__ = "bookings"
-    __table_args__ = {'schema': 'public'}
+  
     
     id = Column(Integer, primary_key=True, index=True)
     mentor_id = Column(Integer, nullable=False)        
@@ -99,7 +106,7 @@ class MentorAvailability(Base):
     __tablename__ = "mentor_availability"
     __table_args__ = (
         UniqueConstraint('mentor_id', 'date', 'time', name='uq_mentor_date_time'),
-        {'schema': 'public'}
+        
     )
 
     id = Column(Integer, primary_key=True, index=True)
