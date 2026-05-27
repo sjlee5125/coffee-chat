@@ -114,7 +114,7 @@ class MentorAvailability(Base):
     mentor_id = Column(Integer, nullable=False, index=True)  # Mentor.id 참조
     date = Column(Date, nullable=False)                      # 예: 2026-05-23
     time = Column(String(5), nullable=False)                 # 예: "09:00" (HH:MM)
-   created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 # ==========================================
