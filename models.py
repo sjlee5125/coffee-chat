@@ -95,12 +95,14 @@ class Booking(Base):
 
 class Notification(Base):
     __tablename__ = "notifications"
+    __table_args__ = {'schema': 'public'}
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id")) # 이 알림을 받을 주인의 ID
-    message = Column(String(255))                     # 알림 내용 (예: "ㅇㅇㅇ님이 커피챗을 신청했습니다.")
-    is_read = Column(Boolean, default=False)          # 읽음 여부 (False면 종에 빨간 점 띄움!)
-    created_at = Column(DateTime, server_default=func.now()) # 알림이 온 시간
+    # 💡 ForeignKey 경로 안에 꼭 'public.users.id'로 스키마를 얹어주세요!
+    user_id = Column(Integer, ForeignKey('public.users.id'), nullable=False) 
+    message = Column(String(255), nullable=False)
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime, server_default=func.now()) # 아까 바꾼 안전한 시간 포맷
     
 # ==========================================
 # [신규] 멘토 가용 시간 테이블
