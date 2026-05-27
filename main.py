@@ -1,5 +1,11 @@
 import os
 import json
+import requests
+import hmac
+import hashlib
+import secrets
+from datetime import datetime, timezone
+from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone, date
 from urllib.parse import quote
 
@@ -11,7 +17,6 @@ from pydantic import BaseModel
 from typing import Optional, Dict, List
 from dotenv import load_dotenv
 from openai import AzureOpenAI
-from utils import send_solapi_sms 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -154,7 +159,14 @@ class PenaltyRequest(BaseModel):
     time: str   # "09:00"
     reason: str
 
+class Notification(Base):
+    __tablename__ = "notifications"
 
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id")) # 이 알림을 받을 주인의 ID
+    message = Column(String(255))                     # 알림 내용 (예: "ㅇㅇㅇ님이 커피챗을 신청했습니다.")
+    is_read = Column(Boolean, default=False)          # 읽음 여부 (False면 종에 빨간 점 띄움!)
+    created_at = Column(DateTime, default=datetime.utcnow) # 알림이 온 시간
 # --- [API 라우터 비즈니스 로직 구역] ---
 
 @app.get("/")
@@ -710,6 +722,50 @@ def get_mentor_summary(mentor_id: int, db: Session = Depends(get_db)):
 print(f"--- [DEBUG] 현재 등록된 라우터 개수: {len(app.routes)} ---")
 for route in app.routes:
     print(f"DEBUG: 경로 정보 -> {route.path} | {getattr(route, 'methods', 'N/A')}")
+
+# 📌 1. 만능 문자 기계를 위에 먼저 배치합니다. (파이썬은 위에서부터 읽기 때문!)
+def send_sms(to_number: str, message_text: str):
+    """
+    솔라피(Solapi)를 이용해 문자를 발송하는 만능 함수입니다.
+    """
+    api_key = os.getenv("API_KEY")
+    api_secret = os.getenv("API_SECRET")
+    sender_number = os.getenv("SENDER_NUMBER")
+
+    if not api_key or not api_secret or not sender_number:
+        print("🚨 문자 발송 실패: .env 파일에 키가 없습니다!")
+        return False
+
+    date = datetime.now(timezone.utc).isoformat()
+    salt = secrets.token_hex(32)
+    message = date + salt
+    signature = hmac.new(api_secret.encode(), message.encode(), hashlib.sha256).hexdigest()
+
+    headers = {
+        "Authorization": f"HMAC-SHA256 apiKey={api_key}, date={date}, salt={salt}, signature={signature}",
+        "Content-Type": "application/json"
+    }
+
+    data = {
+        "message": {
+            "to": to_number.replace("-", ""),
+            "from": sender_number.replace("-", ""),
+            "text": message_text
+        }
+    }
+
+    response = requests.post("https://api.solapi.com/messages/v4/send", headers=headers, json=data)
+    
+    if response.status_code == 200:
+        print(f"✅ 문자 발송 성공! [수신자: {to_number}]")
+        return True
+    else:
+        print(f"❌ 문자 발송 실패: {response.text}")
+        return False
+
+
+# 📌 2. 예약 생성 API (여기도 수정 완료!)
+main
 class ReservationRequest(BaseModel):
     mentor_id: int
     mentee_id: int
@@ -728,8 +784,8 @@ def create_reservation(reservation_data: ReservationRequest, db: Session = Depen
     if mentor and mentor.phone_number:
         sms_message = f"[Coffee Chat]\n{mentor.name} 멘토님!\n{mentee.name}님의 커피챗 신청이 도착했습니다.\n접속해서 확인해주세요☕"
         
-        # 여기서 문자가 날아갑니다!
-        send_solapi_sms(mentor.phone_number, sms_message)
+        # 💡 함수 이름을 send_sms 로 똑같이 맞췄습니다!
+        send_sms(mentor.phone_number, sms_message)
     
     return {"message": "신청 완료 및 멘토 알림 전송 성공!"}
 
