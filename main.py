@@ -695,14 +695,14 @@ def get_mentor_summary(mentor_id: int, db: Session = Depends(get_db)):
     mentor = db.query(Mentor).filter(Mentor.id == mentor_id).first()
     if not mentor:
         raise HTTPException(status_code=404, detail="멘토를 찾을 수 없습니다.")
-    
+
     user = db.query(User).filter(User.id == mentor.user_id).first()
-    
+
     return {
         "name": mentor.name,
         "job_title": mentor.job_title,
         "price": mentor.price,
-        "profile_image": user.profile_image if user else None # 썸네일용
+        "profile_image": user.profile_image if user else None
     }
 
 

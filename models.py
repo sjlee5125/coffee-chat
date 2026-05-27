@@ -1,10 +1,12 @@
 import enum
 from sqlalchemy import (
     create_engine, Column, Integer, String, Text,
-    Enum, DateTime, Date, Boolean, func, UniqueConstraint  # Boolean, UniqueConstraint 추가
+    Enum, DateTime, ForeignKey, Date, Boolean, func, UniqueConstraint  # Boolean, UniqueConstraint 추가
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from datetime import datetime
+
 import socket
 hostname = socket.gethostname()
 if hostname == "coffeechat":
@@ -91,6 +93,15 @@ class Booking(Base):
     cancelled_at = Column(DateTime, nullable=True)                    # 취소 처리 시각
     cancelled_by = Column(String(10), nullable=True)                  # "mentor" | "mentee"
 
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id")) # 이 알림을 받을 주인의 ID
+    message = Column(String(255))                     # 알림 내용 (예: "ㅇㅇㅇ님이 커피챗을 신청했습니다.")
+    is_read = Column(Boolean, default=False)          # 읽음 여부 (False면 종에 빨간 점 띄움!)
+    created_at = Column(DateTime, server_default=func.now()) # 알림이 온 시간
+    
 # ==========================================
 # [신규] 멘토 가용 시간 테이블
 # ==========================================
@@ -112,7 +123,7 @@ class MentorAvailability(Base):
     mentor_id = Column(Integer, nullable=False, index=True)  # Mentor.id 참조
     date = Column(Date, nullable=False)                      # 예: 2026-05-23
     time = Column(String(5), nullable=False)                 # 예: "09:00" (HH:MM)
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 # ==========================================
@@ -122,6 +133,21 @@ class MentorAvailability(Base):
 def create_tables():
     """데이터베이스 유실 없이 새로 추가된 스키마/테이블만 안전하게 생성합니다."""
     Base.metadata.create_all(bind=engine)
+
+# ==========================================
+# [신규] 종 모양 알림(Notification) 테이블
+# ==========================================
+class Notification(Base):
+    __tablename__ = "notifications"
+    __table_args__ = {'schema': 'public'}
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False, index=True) # 알림을 받을 유저 ID
+    message = Column(String(255), nullable=False)         # 알림 내용
+    is_read = Column(Boolean, default=False)              # 읽음 여부 (False면 빨간불!)
+    
+    # 💡 datetime.utcnow 로 완벽하게 수정 완료!
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 def get_db():
     """FastAPI 엔드포인트에서 공통으로 사용할 DB 세션 제너레이터입니다."""
