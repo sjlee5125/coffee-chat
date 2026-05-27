@@ -53,7 +53,8 @@ class User(Base):
     
     # [추가] 프론트엔드에서 Base64 텍스트로 넘어오는 인코딩된 프로필 이미지 저장
     profile_image = Column(Text, nullable=True)
-    
+    phone_number = Column(String(20), nullable=True)
+
     created_at = Column(DateTime, server_default=func.now())
 
 class Mentor(Base):

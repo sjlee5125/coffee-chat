@@ -11,7 +11,10 @@ from pydantic import BaseModel
 from typing import Optional, Dict, List
 from dotenv import load_dotenv
 from openai import AzureOpenAI
-
+from utils import send_solapi_sms 
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
 import auth
 
 # 디버그: auth.py 모듈이 로드된 실제 시스템 경로를 로그에 출력합니다.
@@ -310,6 +313,7 @@ def get_mentors_list(db: Session = Depends(get_db)):
 
 @app.put("/api/user/profile/{user_id}")
 def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session = Depends(get_db)):
+    print("🚨 [CCTV 1] 프론트에서 넘어온 폰번호:", request.phone_number)
     """일반 프로필 수정 정보 DB 영구 업데이트 처리 API"""
     print(f" [프로필 업데이트 요청 접수] User ID: {user_id}")
     user = db.query(User).filter(User.id == user_id).first()
@@ -324,13 +328,15 @@ def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session
     user.portfolio_url = request.portfolio_url
     user.help_provide = request.help_provide
     user.help_receive = request.help_receive
-
+    if request.phone_number is not None:
+        user.phone_number = request.phone_number
     if request.profile_image:
         user.profile_image = request.profile_image
+    print("🚨 [CCTV 2] DB에 넣기 직전 유저 폰번호:", user.phone_number)
 
     db.commit()
     print(f" [DB 반영 성공] 유저 {user_id}번 프로필 영구 업데이트 저장 완료")
-
+    print("🚨 [CCTV 3] DB 저장 완료!")
     return {"message": "프로필 정보가 성공적으로 바인딩되었습니다."}
 
 
@@ -594,6 +600,28 @@ def apply_mentor_penalty(request: PenaltyRequest, db: Session = Depends(get_db))
 print(f"--- [DEBUG] 현재 등록된 라우터 개수: {len(app.routes)} ---")
 for route in app.routes:
     print(f"DEBUG: 경로 정보 -> {route.path} | {getattr(route, 'methods', 'N/A')}")
+class ReservationRequest(BaseModel):
+    mentor_id: int
+    mentee_id: int
+
+@app.post("/api/reservations")
+def create_reservation(reservation_data: ReservationRequest, db: Session = Depends(get_db)):
+    
+    # 1. 예약 정보를 DB에 저장 (대기 상태)
+    # ... (기존 예약 저장 로직) ...
+    
+    # 2. 멘토와 멘티 정보 조회
+    mentor = db.query(User).filter(User.id == reservation_data.mentor_id).first()
+    mentee = db.query(User).filter(User.id == reservation_data.mentee_id).first()
+    
+    # 3. 멘토 전화번호가 있으면 알림 문자 발송! 🚀
+    if mentor and mentor.phone_number:
+        sms_message = f"[Coffee Chat]\n{mentor.name} 멘토님!\n{mentee.name}님의 커피챗 신청이 도착했습니다.\n접속해서 확인해주세요☕"
+        
+        # 여기서 문자가 날아갑니다!
+        send_solapi_sms(mentor.phone_number, sms_message)
+    
+    return {"message": "신청 완료 및 멘토 알림 전송 성공!"}
 
 
 if __name__ == "__main__":

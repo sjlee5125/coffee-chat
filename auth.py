@@ -25,6 +25,7 @@ class UserRegisterRequest(BaseModel):
     password: str
     role: str
     name: str
+    phone_number: str
     bio: str = None
     mbti: str = None
     hashtags: str = None
@@ -33,6 +34,7 @@ class UserRegisterRequest(BaseModel):
     help_provide: str = None
     help_receive: str = None
     profile_image: str = None
+
 
 class UserLoginRequest(BaseModel):
     email: str
@@ -70,7 +72,8 @@ def register(request: UserRegisterRequest, db: Session = Depends(get_db)):
         portfolio_url=request.portfolio_url,
         help_provide=request.help_provide,
         help_receive=request.help_receive,
-        profile_image=request.profile_image
+        profile_image=request.profile_image,
+        phone_number=request.phone_number,
     )
     db.add(new_user)
     db.commit()
