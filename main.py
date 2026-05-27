@@ -524,88 +524,46 @@ def get_mentor_detail(mentor_id: int, db: Session = Depends(get_db)):
 
 @app.post("/api/booking/create")
 def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db)):
-    """멘티의 커피챗 예약 생성 API (ID 매핑 버그 완벽 수정본)"""
-    print(f" [예약 생성 요청 접수] 입력된 mentorId(유저ID 대용): {request.mentorId}, 날짜: {request.date}, 시간: {request.time}")
+    """멘티의 커피챗 예약 생성 API (Mentors.id 기준으로 전면 통일)"""
+    print(f" [예약 생성] 멘토 고유 PK ID: {request.mentorId}, 날짜: {request.date}, 시간: {request.time}")
 
-    # 1. 멘토 확인 (user_id로 먼저 검색, 없으면 mentor.id로 검색)
-    mentor = db.query(Mentor).filter(Mentor.user_id == request.mentorId).first()
-    if not mentor:
-        mentor = db.query(Mentor).filter(Mentor.id == request.mentorId).first()
-        
+    # 1. mentors 테이블의 진짜 PK(id)로 멘토 존재 여부 검증
+    mentor = db.query(Mentor).filter(Mentor.id == request.mentorId).first()
     if not mentor:
         raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
 
-    # 🚨 [핵심 수정] 가용 시간 테이블과 예약 테이블에 실제로 저장되는 멘토 ID의 기준을 
-    # 프론트엔드가 들고 있는 ID 체계(mentor.user_id 또는 mentor.id) 중 안전한 쪽으로 통일합니다.
-    target_mentor_id = mentor.id
-
-    # 2. 중복 예약 검증 (동일 멘토, 동일 시간 대기 차단)
+    # 2. 중복 예약 확인 (진짜 멘토 ID 기준)
     existing = db.query(Booking).filter(
-        Booking.mentor_id == target_mentor_id,
+        Booking.mentor_id == mentor.id,
         Booking.booking_date == request.date,
         Booking.booking_time == request.time,
         Booking.status == "PAID"
     ).first()
-    
     if existing:
-        raise HTTPException(status_code=400, detail="이미 예약이 완료된 시간대입니다.")
+        raise HTTPException(status_code=400, detail="이미 예약이 완결된 슬롯입니다.")
 
-    # 3. 예약 테이블(bookings)에 영구 인서트 가동
+    # 3. 예약 생성
     booking = Booking(
-        mentor_id=target_mentor_id,
+        mentor_id=mentor.id,
         booking_date=request.date,
         booking_time=request.time,
         questions=request.questions,
         status="PAID"
     )
     db.add(booking)
-    db.flush() # 💡 커밋 전 임시 반영해서 ID 무결성 검증 단계를 통과시킵니다.
 
-    # 4. 예약된 시간이니 가용 시간(mentor_availability) 슬롯에서 말소 처리
-    # 💡 멘토의 테이블 매핑 관계에 맞춰 두 조건 모두 지워버리도록 안전 처리
+    # 4. 🟢 가용 시간 테이블에서도 mentor.id(진짜 멘토 PK) 기준으로만 완벽하게 싹 지우기!
     db.query(MentorAvailability).filter(
-        MentorAvailability.mentor_id == target_mentor_id,
-        MentorAvailability.date == request.date,
-        MentorAvailability.time == request.time,
-    ).delete()
-    
-    # 혹시 가용 시간 테이블에 유저 ID(request.mentorId)로 저장되어 있을 경우를 대비한 2차 가드 방어
-    db.query(MentorAvailability).filter(
-        MentorAvailability.mentor_id == request.mentorId,
+        MentorAvailability.mentor_id == mentor.id,
         MentorAvailability.date == request.date,
         MentorAvailability.time == request.time,
     ).delete()
 
-    # 5. 최종 확정 도장 찍기 (이게 불려야 진짜 DB에 들어갑니다!)
     db.commit()
     db.refresh(booking)
     
-    print(f" [DB 저장 대성공] Booking 테이블에 ID {booking.id}번으로 예약 데이터 안착 완료!")
+    print(f" [성공] {mentor.name} 멘토님의 스케줄 예약 완료 (Booking ID: {booking.id})")
     return {"message": "예약이 완료되었습니다.", "booking_id": booking.id}
-
-@app.post("/api/mentor/availability/bulk")
-def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Depends(get_db)):
-    """멘토가 설정한 available 슬롯을 bulk upsert합니다."""
-    print(f" [가용 시간 저장] Mentor ID: {request.mentor_id}, 날짜 수: {len(request.schedules)}")
-
-    for date_str, times in request.schedules.items():
-        db.query(MentorAvailability).filter(
-            MentorAvailability.mentor_id == request.mentor_id,
-            MentorAvailability.date == date_str,
-        ).delete()
-
-        for time in times:
-            slot = MentorAvailability(
-                mentor_id=request.mentor_id,
-                date=date_str,
-                time=time,
-            )
-            db.add(slot)
-
-    db.commit()
-    print(f" [가용 시간 저장 완료] Mentor ID: {request.mentor_id}")
-    return {"message": "가용 시간이 저장되었습니다."}
-
 
 @app.post("/api/mentor/penalty")
 def apply_mentor_penalty(request: PenaltyRequest, db: Session = Depends(get_db)):
