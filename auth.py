@@ -35,6 +35,7 @@ class UserRegisterRequest(BaseModel):
     help_receive: str = None
     profile_image: str = None
 
+
 class UserLoginRequest(BaseModel):
     email: str
     password: str
@@ -72,7 +73,7 @@ def register(request: UserRegisterRequest, db: Session = Depends(get_db)):
         help_provide=request.help_provide,
         help_receive=request.help_receive,
         profile_image=request.profile_image,
-        phone_number=request.phone_number
+        phone_number=request.phone_number,
     )
     db.add(new_user)
     db.commit()
