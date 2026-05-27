@@ -262,6 +262,7 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
         "help_provide": getattr(user, "help_provide", "") or "",
         "help_receive": getattr(user, "help_receive", "") or "",
         "profile_image": getattr(user, "profile_image", "") or "",
+        "phone_number": getattr(user, "phone_number", "") or "",
     }
 
 
