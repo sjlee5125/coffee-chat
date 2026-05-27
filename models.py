@@ -73,12 +73,12 @@ class Booking(Base):
     __table_args__ = {'schema': 'public'}
     
     id = Column(Integer, primary_key=True, index=True)
-    mentor_id = Column(Integer, nullable=False)        
-    user_id = Column(Integer, nullable=True)          
-    booking_date = Column(Date, nullable=False)        
-    booking_time = Column(String(50), nullable=False)  
-    questions = Column(Text, nullable=False)           
-    status = Column(String(50), default="PAID")        
+    mentor_id = Column(Integer, ForeignKey("mentors.id"))
+    user_id = Column(Integer, ForeignKey("users.id"))
+    booking_date = Column(Date)
+    booking_time = Column(String)
+    questions = Column(String)
+    status = Column(String, default="PAID")        
     created_at = Column(DateTime, server_default=func.now())
     penalty_applied = Column(Boolean, default=False, nullable=False)  
     cancelled_at = Column(DateTime, nullable=True)                    
