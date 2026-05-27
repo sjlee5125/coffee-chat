@@ -102,7 +102,7 @@ class Notification(Base):
     user_id = Column(Integer, ForeignKey("users.id")) # 이 알림을 받을 주인의 ID
     message = Column(String(255))                     # 알림 내용 (예: "ㅇㅇㅇ님이 커피챗을 신청했습니다.")
     is_read = Column(Boolean, default=False)          # 읽음 여부 (False면 종에 빨간 점 띄움!)
-    created_at = Column(DateTime, default=datetime.utcnow) # 알림이 온 시간
+    created_at = Column(DateTime, server_default=func.now()) # 알림이 온 시간
     
 # ==========================================
 # [신규] 멘토 가용 시간 테이블
