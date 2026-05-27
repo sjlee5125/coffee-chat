@@ -31,7 +31,6 @@ load_dotenv()
 app = FastAPI()
 
 # 카카오 인증 처리 및 토큰 핸들링을 위한 외부 라우터를 탑재합니다.
-app.include_router(router, prefix="/api/auth")
 
 # 💡 [CORS 설정] 자격 증명(allow_credentials=True) 승인을 위해 명시적인 오리진 리스트를 설계합니다.
 origins = [
@@ -48,6 +47,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(router, prefix="/api/auth")
 
 # 콘솔 디버그: 현재 FastAPI 인스턴스에 탑재되어 실행 준비가 완료된 라우터 목록을 로깅합니다.
 print("--- [DEBUG] 등록된 라우터 경로 확인 ---")
