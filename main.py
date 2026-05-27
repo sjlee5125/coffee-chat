@@ -114,7 +114,7 @@ class AIQuestionRequest(BaseModel):
 
 class BookingCreateRequest(BaseModel):
     mentorId: int
-    userId: int   # 💡 추가
+    userId: int
     date: date
     time: str
     questions: str
@@ -563,12 +563,8 @@ def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db))
     """멘티의 커피챗 예약 생성 API"""
     print(f" [예약 생성 요청] mentor_id={request.mentorId}, date={request.date}, time={request.time}")
 
-    # 1. mentors 테이블의 고유 id(PK)로 멘토 엔티티를 정밀 타겟팅합니다.
-    mentor = db.query(Mentor).filter(Mentor.id == request.mentorId).first()
-    if not mentor:
-        # 프론트가 혹시 user_id를 보냈을 경우를 대비한 유연한 2차 가드 필터링
-        mentor = db.query(Mentor).filter(Mentor.user_id == request.mentorId).first()
-    
+    # 1. 멘토 확인
+    mentor = db.query(Mentor).filter((Mentor.id == request.mentorId) | (Mentor.user_id == request.mentorId)).first()
     if not mentor:
         raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
 
@@ -585,7 +581,7 @@ def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db))
     # 3. 예약 생성
     booking = Booking(
         mentor_id=mentor.id,
-        user_id=request.userId, # 💡 추가
+        user_id=request.userId, # 프론트에서 넘어온 userId 저장
         booking_date=request.date,
         booking_time=request.time,
         questions=request.questions,
@@ -593,7 +589,7 @@ def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db))
     )
     db.add(booking)
 
-    # 4. MentorAvailability에서 해당 슬롯 삭제 (예약되면 더 이상 available 아님)
+    # 4. 가용 슬롯 삭제
     db.query(MentorAvailability).filter(
         MentorAvailability.mentor_id == mentor.id,
         MentorAvailability.date == request.date,
@@ -603,12 +599,14 @@ def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db))
     db.commit()
     db.refresh(booking)
     print(f" [예약 생성 완료] Booking ID: {booking.id}")
-    return {"message": "예약이 완료되었습니다.", "booking_id": booking.id}
+
+    # 5. [중요] 알림 발송은 함수 종료(return) 전에 실행되어야 합니다!
     asyncio.create_task(manager.send_personal_message(
         {"type": "NEW_NOTIFICATION", "message": "🎉 새로운 커피챗 예약 요청이 도착했습니다!"}, 
         mentor.user_id
     ))
 
+    # 6. 최종 응답은 딱 한 번만!
     return {"message": "예약이 완료되었습니다.", "booking_id": booking.id}
 
 # =====================================================================
@@ -720,37 +718,24 @@ def get_user_notifications(db: Session = Depends(get_db)):
     except Exception:
         return []
 class ConnectionManager:
-    def __init__(self):
-        self.active_connections: Dict[int, WebSocket] = {}
-
+    def __init__(self): self.active_connections = {}
     async def connect(self, user_id: int, websocket: WebSocket):
         await websocket.accept()
         self.active_connections[user_id] = websocket
-        print(f"📡 [WebSocket 연결 성공] User ID: {user_id}")
-
     def disconnect(self, user_id: int):
-        if user_id in self.active_connections:
-            del self.active_connections[user_id]
-            print(f"🔌 [WebSocket 연결 해제] User ID: {user_id}")
-
+        if user_id in self.active_connections: del self.active_connections[user_id]
     async def send_personal_message(self, message: dict, user_id: int):
-        if user_id in self.active_connections:
-            await self.active_connections[user_id].send_json(message)
+        if user_id in self.active_connections: await self.active_connections[user_id].send_json(message)
 
 manager = ConnectionManager()
 
 @app.websocket("/ws/notifications/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: int):
-    """프론트엔드와 1:1로 실시간 알림 파이프라인을 유지하는 웹소켓 채널"""
     await manager.connect(user_id, websocket)
     try:
-        while True:
-            # 브라우저가 살아있는지 체크하기 위해 하트비트 대기 상태 유지
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        manager.disconnect(user_id)
+        while True: await websocket.receive_text()
+    except WebSocketDisconnect: manager.disconnect(user_id)
+
 if __name__ == "__main__":
     import uvicorn
-    
-    # 백엔드 서버를 0.0.0.0 IP 대역의 8000번 포트로 구동시킵니다.
     uvicorn.run(app, host="0.0.0.0", port=8000)
