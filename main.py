@@ -23,7 +23,14 @@ from models import User, Mentor, Booking, MentorAvailability, get_db, create_tab
 load_dotenv()
 
 app = FastAPI()
-
+def get_db():
+    """FastAPI 엔드포인트에서 공통으로 사용할 DB 세션 제너레이터입니다."""
+    from models import SessionLocal
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 # 💡 [CORS 설정] 자격 증명(allow_credentials=True) 승인을 위해 명시적인 오리진 리스트를 설계합니다.
 origins = [
     "http://localhost:5173",
