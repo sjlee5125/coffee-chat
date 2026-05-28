@@ -286,24 +286,15 @@ def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Dep
     db.commit()
     return {"message": "가용 시간이 성공적으로 저장되었습니다."}
 
+# =====================================================================
+# [신규] 멘토 가용 시간 관련 엔드포인트
+# =====================================================================
 @app.get("/api/mentor/availability/{mentor_id}")
 def get_mentor_availability(mentor_id: int, db: Session = Depends(get_db)):
     mentor = db.query(Mentor).filter((Mentor.id == mentor_id) | (Mentor.user_id == mentor_id)).first()
-    
     if not mentor:
-        return {}
+        raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
 
-    today = date.today()
-
-    # 💡 [자동 삭제 핵심 로직 추가] 
-    # 오늘보다 이전 날짜(date < today)의 가용 일정 찌꺼기들을 DB에서 완전히 삭제(청소)합니다.
-    db.query(MentorAvailability).filter(
-        (MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id),
-        MentorAvailability.date < today
-    ).delete()
-    db.commit() # 삭제한 내역을 DB에 영구 반영
-
-    # ─── (아래부터는 기존과 동일한 조회 로직) ───
     availability_rows = db.query(MentorAvailability).filter(
         (MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id)
     ).all()
