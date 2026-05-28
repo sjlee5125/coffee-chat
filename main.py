@@ -2,8 +2,8 @@ import os
 import json
 from datetime import datetime, timedelta, timezone, date
 from urllib.parse import quote
-
-from fastapi import FastAPI, Depends, HTTPException, status
+import asyncio
+from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
@@ -23,7 +23,7 @@ from models import User, Mentor, Booking, MentorAvailability, get_db, create_tab
 # 서버 실행 시 시스템의 .env 환경변수를 로드합니다.
 load_dotenv()
 
-create_tables()
+#create_tables()
 
 app = FastAPI()
 
@@ -113,8 +113,8 @@ class AIQuestionRequest(BaseModel):
 
 
 class BookingCreateRequest(BaseModel):
-    """커피챗 예약 생성 시 수신할 요청 데이터 명세"""
     mentorId: int
+    userId: int
     date: date
     time: str
     questions: str
@@ -264,82 +264,66 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
 
 @app.post("/api/mentor/availability/bulk")
 def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Depends(get_db)):
-    """
-    멘토가 설정한 available 슬롯을 bulk upsert합니다.
-    - 요청에 포함된 날짜는 기존 available 삭제 후 새로 insert (날짜 단위 교체)
-    - booked 슬롯은 Booking 테이블에 있으므로 건드리지 않습니다.
-    """
-    print(f" [가용 시간 저장] Mentor ID: {request.mentor_id}, 날짜 수: {len(request.schedules)}")
+    mentor = db.query(Mentor).filter((Mentor.id == request.mentor_id) | (Mentor.user_id == request.mentor_id)).first()
+    
+    # 💡 [핵심 2] 멘토 프로필이 아직 없다면 튕겨내지 않고 즉시 자동으로 생성해줍니다!
+    if not mentor:
+        user = db.query(User).filter(User.id == request.mentor_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="회원 정보가 없습니다.")
+        # 자동으로 멘토 프로필을 만들고 저장
+        mentor = Mentor(user_id=request.mentor_id, name=user.name, job_title="직무 미정")
+        db.add(mentor)
+        db.commit()
+        db.refresh(mentor)
 
     for date_str, times in request.schedules.items():
-        # 해당 날짜의 기존 available 슬롯 삭제
         db.query(MentorAvailability).filter(
-            MentorAvailability.mentor_id == request.mentor_id,
+            (MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id),
             MentorAvailability.date == date_str,
         ).delete()
 
-        # 새 슬롯 insert
-        for time in times:
+        for time_str in times:
             slot = MentorAvailability(
-                mentor_id=request.mentor_id,
+                mentor_id=mentor.id,
                 date=date_str,
-                time=time,
+                time=time_str,
             )
             db.add(slot)
 
     db.commit()
-    print(f" [가용 시간 저장 완료] Mentor ID: {request.mentor_id}")
-    return {"message": "가용 시간이 저장되었습니다."}
-
+    return {"message": "가용 시간이 성공적으로 저장되었습니다."}
 
 # =====================================================================
 # [신규] 멘토 가용 시간 관련 엔드포인트
 # =====================================================================
-
 @app.get("/api/mentor/availability/{mentor_id}")
 def get_mentor_availability(mentor_id: int, db: Session = Depends(get_db)):
-    # 1. 멘토 고유 일련번호(id)로 먼저 찾고, 없으면 호환성을 위해 user_id 매핑 체킹
-    mentor = db.query(Mentor).filter(Mentor.id == mentor_id).first()
-    if not mentor:
-        mentor = db.query(Mentor).filter(Mentor.user_id == mentor_id).first()
-    
+    mentor = db.query(Mentor).filter((Mentor.id == mentor_id) | (Mentor.user_id == mentor_id)).first()
     if not mentor:
         raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
 
-    today = date.today()
-
     availability_rows = db.query(MentorAvailability).filter(
-        MentorAvailability.mentor_id == mentor.id,
-        MentorAvailability.date >= today
+        (MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id)
     ).all()
 
-    print(f" [디버그] 조회된 availability 슬롯 수: {len(availability_rows)}")
-
     booking_rows = db.query(Booking).filter(
-        Booking.mentor_id == mentor.id,
-        Booking.booking_date >= today,
+        (Booking.mentor_id == mentor.id) | (Booking.mentor_id == mentor.user_id),
         Booking.status == "PAID"
     ).all()
 
-    # 3. 프론트 형태에 맞게 { "YYYY-MM-DD": { "HH:MM": "available/booked" } } 로 조립
     result: Dict[str, Dict[str, str]] = {}
-
     for row in availability_rows:
-        date_key = str(row.date)
-        if date_key not in result:
-            result[date_key] = {}
-        result[date_key][row.time] = "available"
+        dk = str(row.date)
+        if dk not in result: result[dk] = {}
+        result[dk][row.time] = "available"
 
     for row in booking_rows:
-        date_key = str(row.booking_date)
-        if date_key not in result:
-            result[date_key] = {}
-        result[date_key][row.booking_time] = "booked"  # ✅ available 위에 덮어씌움
+        dk = str(row.booking_date)
+        if dk not in result: result[dk] = {}
+        result[dk][row.booking_time] = "booked"
 
     return result
-
-
-# 💡 [신규 추가] 특정 유저의 분리형 멘토 상세 정보를 조회하는 API
 @app.get("/api/mentor/details/{user_id}")
 def get_mentor_details(user_id: int, db: Session = Depends(get_db)):
     print(f" [멘토 프로필 상세 조회 요청] User ID: {user_id}")
@@ -561,29 +545,31 @@ def get_mentor_detail(mentor_id: int, db: Session = Depends(get_db)):
 
 @app.post("/api/booking/create")
 def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db)):
-    """멘티의 커피챗 예약 생성 API"""
-    print(f" [예약 생성 요청] mentor_id={request.mentorId}, date={request.date}, time={request.time}")
+    """멘티의 커피챗 예약 생성 API (데이터 무결성 가드 보강 버전)"""
+    print(f" [예약 생성 요청] mentor_id={request.mentorId}, user_id={request.userId}, date={request.date}, time={request.time}")
 
-    # 1. mentors 테이블의 고유 id(PK)로 멘토 엔티티를 정밀 타겟팅합니다.
-    mentor = db.query(Mentor).filter(Mentor.id == request.mentorId).first()
-    if not mentor:
-        # 프론트가 혹시 user_id를 보냈을 경우를 대비한 유연한 2차 가드 필터링
-        mentor = db.query(Mentor).filter(Mentor.user_id == request.mentorId).first()
-    
-    if not mentor:
+    # 1. 멘토 정밀 타겟 조회
+    mentor = db.query(Mentor).filter((Mentor.id == request.mentorId) | (Mentor.user_id == request.mentorId)).first()
+    if not mentor: 
         raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
 
-    # 2. 중복 예약 확인
+    # 2. 유저 회원 데이터 정밀 검증 (models.py의 ForeignKey("users.id") 충족 확인)
+    user = db.query(User).filter(User.id == request.userId).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="존재하지 않는 예약자(유저) 회원입니다.")
+
+    # 3. 교차 중복 예약 확인 가드 체킹 (mentor.id와 mentor.user_id 양방향 모두 차단)
     existing = db.query(Booking).filter(
-        Booking.mentor_id == mentor.id,
+        ((Booking.mentor_id == mentor.id) | (Booking.mentor_id == mentor.user_id)),
         Booking.booking_date == request.date,
         Booking.booking_time == request.time,
         Booking.status == "PAID"
     ).first()
+    
     if existing:
-        raise HTTPException(status_code=400, detail="이미 예약된 시간입니다.")
+        raise HTTPException(status_code=400, detail="이미 예약이 완료된 시간대입니다.")
 
-    # 3. 예약 생성
+    # 4. 명확하게 정의된 매핑 규격으로 영구 저장 (멘토의 고유 PK인 mentor.id로 고정 바인딩)
     booking = Booking(
         mentor_id=mentor.id,
         user_id=request.userId,
@@ -594,16 +580,26 @@ def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db))
     )
     db.add(booking)
 
-    # 4. MentorAvailability에서 해당 슬롯 삭제 (예약되면 더 이상 available 아님)
+    # 5. 가용 일정 테이블 슬롯 제거 시에도 양방향 조건으로 안전하게 클리어
     db.query(MentorAvailability).filter(
-        MentorAvailability.mentor_id == mentor.id,
+        ((MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id)),
         MentorAvailability.date == request.date,
         MentorAvailability.time == request.time,
     ).delete()
 
     db.commit()
     db.refresh(booking)
-    print(f" [예약 생성 완료] Booking ID: {booking.id}")
+    print(f" [예약 생성 성공 완결] Booking ID: {booking.id} 매핑 데이터 세팅 완료")
+
+    # 6. 실시간 웹소켓 알림 발송 처리
+    try:
+        asyncio.create_task(manager.send_personal_message(
+            {"type": "NEW_NOTIFICATION", "message": "🎉 새로운 커피챗 예약 요청이 도착했습니다!"}, 
+            mentor.user_id
+        ))
+    except Exception as ws_err:
+        print(f" [알림 전송 실패 비치명적 에러]: {str(ws_err)}")
+
     return {"message": "예약이 완료되었습니다.", "booking_id": booking.id}
 
 # 예약 목록 조회 API (날짜/시간 기준 자동 분류)
@@ -657,25 +653,19 @@ def get_bookings(user_id: int, db: Session = Depends(get_db)):
 # =====================================================================
 # 💡 [신규/보완] 멘토 가용 시간 Bulk 저장 (ID 꼬임 완전 방지 가드 탑재)
 # =====================================================================
-@app.post("/api/mentor/availability/bulk")
 def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Depends(get_db)):
-    print(f" [가용 시간 bulk 저장 시작] 수신된 ID 파라미터: {request.mentor_id}")
-
-    # 인입된 ID가 유저 ID일지, 멘토 ID일지 모르기 때문에 둘 다 교차 검증을 가동합니다.
-    mentor = db.query(Mentor).filter(Mentor.id == request.mentor_id).first()
-    if not mentor:
-        mentor = db.query(Mentor).filter(Mentor.user_id == request.mentor_id).first()
-        
+    # 1. 멘토 타겟팅
+    mentor = db.query(Mentor).filter((Mentor.id == request.mentor_id) | (Mentor.user_id == request.mentor_id)).first()
     if not mentor:
         raise HTTPException(status_code=404, detail="등록된 멘토 프로필을 찾을 수 없습니다.")
 
-    # 멘토의 진짜 고유 고정 PK(id)를 기준으로 가용 시간 데이터를 인서트합니다.
     real_mentor_id = mentor.id
 
     for date_str, times in request.schedules.items():
-        # 기존 해당 날짜 슬롯을 클리어 한 후 재인서트 (Upsert 구현)
+        # 💡 [핵심 교정] 기존에 잘못 섞여 들어간 user_id 기준의 가용 시간 데이터까지 
+        # 양방향 필터로 싹 긁어서 완벽하게 삭제(Clear)한 뒤 새로운 슬롯을 덮어씁니다.
         db.query(MentorAvailability).filter(
-            MentorAvailability.mentor_id == real_mentor_id,
+            (MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id),
             MentorAvailability.date == date_str,
         ).delete()
 
@@ -688,7 +678,7 @@ def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Dep
             db.add(slot)
 
     db.commit()
-    print(f" [성공] 멘토 {mentor.name} (PK: {real_mentor_id}) 가용 일정 bulk 덤프 완료")
+    print(f" [가용 시간 저장 완료] Mentor PK: {real_mentor_id}의 일정 동기화 성공")
     return {"message": "가용 시간이 성공적으로 저장되었습니다."}
 
 
@@ -762,9 +752,33 @@ def get_user_notifications(db: Session = Depends(get_db)):
         return []
     except Exception:
         return []
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[int, WebSocket] = {}
+
+    async def connect(self, user_id: int, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections[user_id] = websocket
+        print(f"📡 [WebSocket 연결] User ID: {user_id}")
+
+    def disconnect(self, user_id: int):
+        if user_id in self.active_connections:
+            del self.active_connections[user_id]
+            print(f"🔌 [WebSocket 연결 해제] User ID: {user_id}")
+
+    async def send_personal_message(self, message: dict, user_id: int):
+        if user_id in self.active_connections:
+            await self.active_connections[user_id].send_json(message)
+
+manager = ConnectionManager()
+
+@app.websocket("/ws/notifications/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, user_id: int):
+    await manager.connect(user_id, websocket)
+    try:
+        while True: await websocket.receive_text()
+    except WebSocketDisconnect: manager.disconnect(user_id)
 
 if __name__ == "__main__":
     import uvicorn
-    
-    # 백엔드 서버를 0.0.0.0 IP 대역의 8000번 포트로 구동시킵니다.
     uvicorn.run(app, host="0.0.0.0", port=8000)
