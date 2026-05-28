@@ -131,3 +131,30 @@ def get_mentor_bookings(mentor_id: int, db: Session = Depends(get_db)):
         })
     
     return result
+
+@router.get("/mentee/{user_id}")
+def get_mentee_bookings(user_id: int, db: Session = Depends(get_db)):
+    """
+    유저(멘티)가 호스트(멘토)에게 신청한 예약 내역을 조회합니다.
+    """
+    # 현재 유저가 멘티로서 신청한 예약 조회
+    bookings = db.query(Booking).filter(Booking.user_id == user_id).all()
+
+    result = []
+    for b in bookings:
+        # 내가 신청한 멘토의 정보 조회
+        mentor = db.query(Mentor).filter(Mentor.id == b.mentor_id).first()
+        mentor_user = db.query(User).filter(User.id == mentor.user_id).first() if mentor else None
+        
+        result.append({
+            "booking_id": b.id,
+            "partner_name": mentor.name if mentor else "알 수 없는 멘토",
+            "partner_image": mentor_user.profile_image if mentor_user and hasattr(mentor_user, 'profile_image') else None,
+            "booking_date": str(b.booking_date) if b.booking_date else "", 
+            "booking_time": str(b.booking_time) if b.booking_time else "",
+            "candidate_times": f"{b.booking_date} {b.booking_time}", 
+            "questions": b.questions,
+            "status": b.status
+        })
+    
+    return result
