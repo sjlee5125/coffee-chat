@@ -24,7 +24,9 @@ origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://48.211.169.52",
-    "http://48.211.169.52:8000", 
+    "http://48.211.169.52:8000",
+    "ws://localhost:8000",      # 웹소켓용 추가
+    "ws://48.211.169.52:8000",  # 웹소켓용 추가 
 ]
 
 app.add_middleware(
@@ -43,7 +45,7 @@ app.include_router(users.router)
 app.include_router(mentors.router)
 app.include_router(bookings.router)
 app.include_router(ai.router)
-app.include_router(notifications.router)
+app.include_router(notifications.router, prefix="/api")
 
 
 @app.get("/")
