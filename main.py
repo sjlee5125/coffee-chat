@@ -34,7 +34,7 @@ app.add_middleware(
     allow_methods=["*"], 
     allow_headers=["*"], 
 )
-
+    
 # =====================================================================
 # 🧩 라우터 블록 조립 구역 (여기서 모든 파일이 연결됩니다)
 # =====================================================================
@@ -56,11 +56,8 @@ def root():
 # 🔑 카카오 인증 콜백 (auth 모듈과 밀접하게 결합되어 main에 유지)
 # =====================================================================
 @app.get("/login/kakao/callback")
-async def kakao_callback(code: str, db: Session = Depends(get_db)):
-    provider_id = "4893673152"
-    email = None
-    name = "이승재"
-
+async def kakao_callback(code: str, db: Session = Depends(get_db)):    
+    
     try:
         try:
             kakao_token = auth.get_kakao_token(code)
