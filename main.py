@@ -297,6 +297,32 @@ def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Dep
 # [신규] 멘토 가용 시간 관련 엔드포인트
 # =====================================================================
 @app.get("/api/mentor/availability/{mentor_id}")
+def get_mentor_availability(mentor_id: int, db: Session = Depends(get_db)):
+    mentor = db.query(Mentor).filter((Mentor.id == mentor_id) | (Mentor.user_id == mentor_id)).first()
+    if not mentor:
+        raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
+
+    availability_rows = db.query(MentorAvailability).filter(
+        (MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id)
+    ).all()
+
+    booking_rows = db.query(Booking).filter(
+        (Booking.mentor_id == mentor.id) | (Booking.mentor_id == mentor.user_id),
+        Booking.status == "PAID"
+    ).all()
+
+    result: Dict[str, Dict[str, str]] = {}
+    for row in availability_rows:
+        dk = str(row.date)
+        if dk not in result: result[dk] = {}
+        result[dk][row.time] = "available"
+
+    for row in booking_rows:
+        dk = str(row.booking_date)
+        if dk not in result: result[dk] = {}
+        result[dk][row.booking_time] = "booked"
+
+    return result
 @app.get("/api/mentor/details/{user_id}")
 def get_mentor_details(user_id: int, db: Session = Depends(get_db)):
     print(f" [멘토 프로필 상세 조회 요청] User ID: {user_id}")
