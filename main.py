@@ -264,17 +264,24 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
 @app.post("/api/mentor/availability/bulk")
 def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Depends(get_db)):
     mentor = db.query(Mentor).filter((Mentor.id == request.mentor_id) | (Mentor.user_id == request.mentor_id)).first()
+    
+    # 💡 [핵심 2] 멘토 프로필이 아직 없다면 튕겨내지 않고 즉시 자동으로 생성해줍니다!
     if not mentor:
-        raise HTTPException(status_code=404, detail="등록된 멘토 프로필을 찾을 수 없습니다.")
+        user = db.query(User).filter(User.id == request.mentor_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="회원 정보가 없습니다.")
+        # 자동으로 멘토 프로필을 만들고 저장
+        mentor = Mentor(user_id=request.mentor_id, name=user.name, job_title="직무 미정")
+        db.add(mentor)
+        db.commit()
+        db.refresh(mentor)
 
     for date_str, times in request.schedules.items():
-        # 기존 찌꺼기 슬롯들을 양방향 ID 기준으로 완벽하게 클리어
         db.query(MentorAvailability).filter(
             (MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id),
             MentorAvailability.date == date_str,
         ).delete()
 
-        # 무조건 멘토의 고유 PK (mentor.id) 로 통일하여 저장
         for time_str in times:
             slot = MentorAvailability(
                 mentor_id=mentor.id,
@@ -290,32 +297,6 @@ def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Dep
 # [신규] 멘토 가용 시간 관련 엔드포인트
 # =====================================================================
 @app.get("/api/mentor/availability/{mentor_id}")
-def get_mentor_availability(mentor_id: int, db: Session = Depends(get_db)):
-    mentor = db.query(Mentor).filter((Mentor.id == mentor_id) | (Mentor.user_id == mentor_id)).first()
-    if not mentor:
-        raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
-
-    availability_rows = db.query(MentorAvailability).filter(
-        (MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id)
-    ).all()
-
-    booking_rows = db.query(Booking).filter(
-        (Booking.mentor_id == mentor.id) | (Booking.mentor_id == mentor.user_id),
-        Booking.status == "PAID"
-    ).all()
-
-    result: Dict[str, Dict[str, str]] = {}
-    for row in availability_rows:
-        dk = str(row.date)
-        if dk not in result: result[dk] = {}
-        result[dk][row.time] = "available"
-
-    for row in booking_rows:
-        dk = str(row.booking_date)
-        if dk not in result: result[dk] = {}
-        result[dk][row.booking_time] = "booked"
-
-    return result
 @app.get("/api/mentor/details/{user_id}")
 def get_mentor_details(user_id: int, db: Session = Depends(get_db)):
     print(f" [멘토 프로필 상세 조회 요청] User ID: {user_id}")
@@ -412,11 +393,11 @@ def register_mentor(user_id: int, request: MentorRegisterRequest, db: Session = 
 
 @app.get("/api/mentor/dashboard/{user_id}")
 def get_mentor_dashboard_data(user_id: int, db: Session = Depends(get_db)):
+    """멘토 대시보드 내 실시간 활동 지표 조회 API"""
+    print(f" [대시보드 데이터 요청 접수] User ID: {user_id}")
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="존재하지 않는 사용자입니다.")
-
-    mentor = db.query(Mentor).filter(Mentor.user_id == user_id).first()
 
     stats_data = {
         "name": user.name,
@@ -426,31 +407,9 @@ def get_mentor_dashboard_data(user_id: int, db: Session = Depends(get_db)):
         "mentoring_hours": getattr(user, "mentoring_hours", 63.5),
     }
 
-    upcoming_chats = []
-    if mentor:
-        today = date.today()
-        
-        # 💡 강제로 [] 로 비워져 있던 배열을 실제 DB Booking 데이터로 채워줍니다.
-        bookings = db.query(Booking).filter(
-            (Booking.mentor_id == mentor.id) | (Booking.mentor_id == mentor.user_id),
-            Booking.booking_date >= today,
-            Booking.status == "PAID"
-        ).order_by(Booking.booking_date, Booking.booking_time).all()
-
-        for b in bookings:
-            # 해당 예약을 신청한 멘티(예약자)의 이름도 같이 가져옵니다.
-            mentee = db.query(User).filter(User.id == b.user_id).first()
-            upcoming_chats.append({
-                "id": b.id,
-                "date": str(b.booking_date),
-                "time": b.booking_time,
-                "mentee_name": mentee.name if mentee else "예약자",
-                "questions": b.questions
-            })
-
     return {
         "stats": stats_data,
-        "upcoming_chats": upcoming_chats,
+        "upcoming_chats": [],
     }
 
 
