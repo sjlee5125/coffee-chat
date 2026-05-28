@@ -118,6 +118,7 @@ class BookingCreateRequest(BaseModel):
     date: date
     time: str
     questions: str
+    userId: Optional[int] = None
 
 
 class MentorRegisterRequest(BaseModel):
@@ -585,6 +586,7 @@ def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db))
     # 3. 예약 생성
     booking = Booking(
         mentor_id=mentor.id,
+        user_id=request.userId,
         booking_date=request.date,
         booking_time=request.time,
         questions=request.questions,
@@ -604,6 +606,53 @@ def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db))
     print(f" [예약 생성 완료] Booking ID: {booking.id}")
     return {"message": "예약이 완료되었습니다.", "booking_id": booking.id}
 
+# 예약 목록 조회 API (날짜/시간 기준 자동 분류)
+@app.get("/api/bookings/{user_id}")
+def get_bookings(user_id: int, db: Session = Depends(get_db)):
+    print(f" [예약 목록 조회] User ID: {user_id}")
+    
+    from datetime import date, datetime, timedelta
+    
+    bookings = db.query(Booking).filter(
+        Booking.user_id == user_id
+    ).order_by(Booking.booking_date.desc()).all()
+    
+    now = datetime.now()
+    result = []
+    
+    for b in bookings:
+        try:
+            booking_datetime = datetime.strptime(
+                f"{b.booking_date} {b.booking_time}", 
+                "%Y-%m-%d %H:%M"
+            )
+        except:
+            booking_datetime = datetime.strptime(
+                f"{b.booking_date} {b.booking_time}", 
+                "%Y-%m-%d %I:%M %p"
+            )
+        
+        # 시간 기준으로 상태 자동 분류
+        if now < booking_datetime - timedelta(minutes=5):
+            tab_status = "upcoming"    # 예정
+        elif booking_datetime - timedelta(minutes=5) <= now <= booking_datetime + timedelta(minutes=30):
+            tab_status = "ongoing"     # 진행중
+        else:
+            tab_status = "completed"   # 종료
+            
+        result.append({
+            "id": b.id,
+            "mentor_id": b.mentor_id,
+            "user_id": b.user_id,
+            "booking_date": str(b.booking_date),
+            "booking_time": b.booking_time,
+            "questions": b.questions,
+            "status": b.status,
+            "tab_status": tab_status,
+            "created_at": str(b.created_at)
+        })
+    
+    return result
 
 # =====================================================================
 # 💡 [신규/보완] 멘토 가용 시간 Bulk 저장 (ID 꼬임 완전 방지 가드 탑재)
