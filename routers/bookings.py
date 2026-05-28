@@ -100,3 +100,34 @@ def confirm_booking(booking_id: int, db: Session = Depends(get_db)):
         print(f" [알림 전송 실패]: {str(ws_err)}")
     
     return {"message": "커피챗 예약이 최종 확정되었습니다."}
+@router.get("/mentor/{mentor_id}")
+def get_mentor_bookings(mentor_id: int, db: Session = Depends(get_db)):
+    """
+    멘토 대시보드 예약 내역 페이지에 띄울 데이터를 조회합니다.
+    (멘토 ID를 기준으로 해당 멘토에게 들어온 모든 예약 신청을 가져옵니다.)
+    """
+    # 멘토가 User 테이블의 id를 쓰고 있는지 Mentor 테이블의 id를 쓰고 있는지에 맞춰 조회
+    mentor = db.query(Mentor).filter((Mentor.id == mentor_id) | (Mentor.user_id == mentor_id)).first()
+    
+    if not mentor:
+        raise HTTPException(status_code=404, detail="멘토 정보를 찾을 수 없습니다.")
+
+    # 해당 멘토의 예약 내역을 모두 조회 (PENDING/PAID 등 확정 전 상태 포함)
+    bookings = db.query(Booking).filter(
+        (Booking.mentor_id == mentor.id) | (Booking.mentor_id == mentor.user_id)
+    ).all()
+
+    # 프론트엔드에서 요구하는 필드 형태로 가공하여 리턴합니다.
+    result = []
+    for b in bookings:
+        mentee = db.query(User).filter(User.id == b.user_id).first()
+        result.append({
+            "booking_id": b.id,
+            "mentee_name": mentee.name if mentee else "익명 크루",
+            "mentee_image": mentee.profile_image if mentee and hasattr(mentee, 'profile_image') else None,
+            "candidate_times": f"['{b.booking_time}']", # 프론트에서 파싱하기 쉽게 리스트 형태 문자열로
+            "questions": b.questions,
+            "status": b.status
+        })
+    
+    return result
