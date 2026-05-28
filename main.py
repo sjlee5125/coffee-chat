@@ -15,7 +15,7 @@ from routers import users, mentors, bookings, ai, notifications
 
 # 서버 실행 시 시스템의 .env 환경변수를 로드 및 DB 초기화
 load_dotenv()
-#create_tables()
+create_tables()
 
 app = FastAPI()
 
