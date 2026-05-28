@@ -1,0 +1,233 @@
+from datetime import datetime, date
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from typing import Dict
+from models import User, Mentor, Booking, MentorAvailability, get_db
+from schemas import MentorRegisterRequest, AvailabilityBulkRequest, PenaltyRequest
+
+router = APIRouter(tags=["Mentors"])
+
+@router.get("/api/mentors")
+def get_mentors(db: Session = Depends(get_db)):
+    results = db.query(Mentor).all()
+    return [
+        {
+            "id": m.id,
+            "name": m.name or "멘토",
+            "avatar": "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400",
+            "price": m.price or "10,000 원",
+            "job_title": m.job_title or "커리어 가이드",
+            "techStack": ["백엔드", "인프라"],
+            "bio": m.mentor_intro or "반가워요!"
+        }
+        for m in results
+    ]
+
+@router.get("/api/mentors/list")
+def get_mentors_list(db: Session = Depends(get_db)):
+    results = db.query(Mentor, User).join(User, Mentor.user_id == User.id).all()
+    mentors_data = []
+    for mentor, user in results:
+        mentors_data.append({
+            "id": mentor.user_id,
+            "name": mentor.name,
+            "job_title": mentor.job_title or "직무 미상",
+            "hashtags": getattr(user, "hashtags", "") or "",
+            "profile_image": getattr(user, "profile_image", "") or "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400"
+        })
+    return mentors_data
+
+@router.get("/api/mentors/{mentor_id}")
+def get_mentor_detail(mentor_id: int, db: Session = Depends(get_db)):
+    mentor = db.query(Mentor).filter(Mentor.id == mentor_id).first()
+    if not mentor:
+        raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
+    return {
+        "id": mentor.id,
+        "name": mentor.name or "멘토",
+        "job_title": mentor.job_title or "직무 미정",
+        "mentor_intro": mentor.mentor_intro or "<p>소개글이 없습니다.</p>",
+        "career_history": mentor.career_history or [],
+        "mentoring_topics": mentor.mentoring_topics or [],
+        "detailed_experience": mentor.detailed_experience or [],
+        "profile_image": "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400"
+    }
+
+@router.get("/api/mentor/details/{user_id}")
+def get_mentor_details(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="존재하지 않는 사용자 회원입니다.")
+    mentor = db.query(Mentor).filter(Mentor.user_id == user_id).first()
+    if not mentor:
+        raise HTTPException(status_code=404, detail="해당 사용자는 멘토로 등록되어 있지 않습니다.")
+    return {
+        "id": mentor.id,
+        "user_id": mentor.user_id,
+        "name": mentor.name or user.name,
+        "profile_image": user.profile_image or "",
+        "job_title": mentor.job_title,
+        "career_history": mentor.career_history,
+        "mentor_intro": mentor.mentor_intro,
+        "mentoring_topics": mentor.mentoring_topics,
+        "detailed_experience": mentor.detailed_experience,
+        "price": mentor.price or "10,000 원",
+    }
+
+@router.post("/api/mentor/register/{user_id}")
+def register_mentor(user_id: int, request: MentorRegisterRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="존재하지 않는 회원 데이터입니다.")
+
+    user.name = request.name
+    user.hashtags = request.hashtags
+    user.portfolio_url = request.portfolio_url          
+    user.portfolio_file_path = request.portfolio_file_path  
+
+    mentor = db.query(Mentor).filter(Mentor.user_id == user_id).first()
+    if not mentor:
+        mentor = Mentor(user_id=user_id)
+        db.add(mentor)
+
+    mentor.name = request.name
+    mentor.job_title = request.job_title
+    mentor.career_history = request.career_history
+    mentor.mentor_intro = request.mentor_intro
+    mentor.mentoring_topics = request.mentoring_topics
+    mentor.detailed_experience = request.detailed_experience
+
+    db.commit()
+    return {"message": "멘토 프로필 독립 등록 완료"}
+
+@router.get("/api/mentor/dashboard/{user_id}")
+def get_mentor_dashboard_data(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="존재하지 않는 사용자입니다.")
+
+    mentor = db.query(Mentor).filter(Mentor.user_id == user_id).first()
+
+    stats_data = {
+        "name": user.name,
+        "total_chats": getattr(user, "total_chats", 127),
+        "total_earnings": getattr(user, "total_earnings", 9525),
+        "average_rating": getattr(user, "average_rating", 4.9),
+        "mentoring_hours": getattr(user, "mentoring_hours", 63.5),
+    }
+
+    upcoming_chats = []
+    if mentor:
+        today = date.today()
+        bookings = db.query(Booking).filter(
+            (Booking.mentor_id == mentor.id) | (Booking.mentor_id == mentor.user_id),
+            Booking.booking_date >= today,
+            Booking.status == "PAID"
+        ).order_by(Booking.booking_date, Booking.booking_time).all()
+
+        for b in bookings:
+            mentee = db.query(User).filter(User.id == b.user_id).first()
+            upcoming_chats.append({
+                "id": b.id,
+                "date": str(b.booking_date),
+                "time": b.booking_time,
+                "mentee_name": mentee.name if mentee else "예약자",
+                "questions": b.questions
+            })
+
+    return {
+        "stats": stats_data,
+        "upcoming_chats": upcoming_chats,
+    }
+
+@router.get("/api/mentor/availability/{mentor_id}")
+def get_mentor_availability(mentor_id: int, db: Session = Depends(get_db)):
+    mentor = db.query(Mentor).filter((Mentor.id == mentor_id) | (Mentor.user_id == mentor_id)).first()
+    if not mentor:
+        return {} # 404 에러 튕김 방지
+
+    today = date.today()
+    
+    # 💡 과거 일정 자동 청소 (Lazy Cleanup)
+    db.query(MentorAvailability).filter(
+        (MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id),
+        MentorAvailability.date < today
+    ).delete()
+    db.commit()
+
+    availability_rows = db.query(MentorAvailability).filter(
+        (MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id)
+    ).all()
+
+    booking_rows = db.query(Booking).filter(
+        (Booking.mentor_id == mentor.id) | (Booking.mentor_id == mentor.user_id),
+        Booking.status == "PAID"
+    ).all()
+
+    result: Dict[str, Dict[str, str]] = {}
+    for row in availability_rows:
+        dk = str(row.date)
+        if dk not in result: result[dk] = {}
+        result[dk][row.time] = "available"
+
+    for row in booking_rows:
+        dk = str(row.booking_date)
+        if dk not in result: result[dk] = {}
+        result[dk][row.booking_time] = "booked"
+
+    return result
+
+@router.post("/api/mentor/availability/bulk")
+def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Depends(get_db)):
+    mentor = db.query(Mentor).filter((Mentor.id == request.mentor_id) | (Mentor.user_id == request.mentor_id)).first()
+    
+    # 💡 멘토 프로필이 없다면 즉시 생성
+    if not mentor:
+        user = db.query(User).filter(User.id == request.mentor_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="회원 정보가 없습니다.")
+        mentor = Mentor(user_id=request.mentor_id, name=user.name, job_title="직무 미정")
+        db.add(mentor)
+        db.commit()
+        db.refresh(mentor)
+
+    real_mentor_id = mentor.id
+
+    for date_str, times in request.schedules.items():
+        db.query(MentorAvailability).filter(
+            (MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id),
+            MentorAvailability.date == date_str,
+        ).delete()
+
+        for time_str in times:
+            slot = MentorAvailability(mentor_id=real_mentor_id, date=date_str, time=time_str)
+            db.add(slot)
+
+    db.commit()
+    return {"message": "가용 시간이 성공적으로 저장되었습니다."}
+
+@router.post("/api/mentor/penalty")
+def apply_mentor_penalty(request: PenaltyRequest, db: Session = Depends(get_db)):
+    booking = db.query(Booking).filter(
+        Booking.mentor_id == request.mentor_id,
+        Booking.booking_date == request.date,
+        Booking.booking_time == request.time,
+        Booking.status == "PAID",
+    ).first()
+
+    if not booking:
+        raise HTTPException(status_code=404, detail="해당 예약을 찾을 수 없습니다.")
+
+    booking.status = "CANCELLED"
+    booking.penalty_applied = True
+    booking.cancelled_at = datetime.utcnow()
+    booking.cancelled_by = "mentor"
+
+    db.query(MentorAvailability).filter(
+        MentorAvailability.mentor_id == request.mentor_id,
+        MentorAvailability.date == request.date,
+        MentorAvailability.time == request.time,
+    ).delete()
+
+    db.commit()
+    return {"message": "예약이 취소되었으며 패널티가 부여되었습니다.", "booking_id": booking.id}

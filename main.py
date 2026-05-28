@@ -1,46 +1,35 @@
 import os
-import json
-from datetime import datetime, timedelta, timezone, date
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
-import asyncio
-from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
-from typing import Optional, Dict, List
 from dotenv import load_dotenv
-from openai import AzureOpenAI
 
 import auth
+from models import User, get_db, create_tables
 
-# 디버그: auth.py 모듈이 로드된 실제 시스템 경로를 로그에 출력합니다.
-print(f"DEBUG: auth.py loaded from: {auth.__file__}")
-from auth import router
-from models import User, Mentor, Booking, MentorAvailability, get_db, create_tables
+# 💡 새로 분리한 기능별 라우터들을 가져옵니다.
+from routers import users, mentors, bookings, ai, notifications
 
-
-# 서버 실행 시 시스템의 .env 환경변수를 로드합니다.
+# 서버 실행 시 시스템의 .env 환경변수를 로드 및 DB 초기화
 load_dotenv()
-
 #create_tables()
 
 app = FastAPI()
 
-# 카카오 인증 처리 및 토큰 핸들링을 위한 외부 라우터를 탑재합니다.
-app.include_router(router, prefix="/api/auth")
-
-# 💡 [CORS 설정] 자격 증명(allow_credentials=True) 승인을 위해 명시적인 오리진 리스트를 설계합니다.
+# 💡 [CORS 설정]
 origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://48.211.169.52",
-    "http://48.211.169.52:8000", # 백엔드 API 포트 주소도 명시적으로 허용하여 CORS 차단을 예방합니다.
+    "http://48.211.169.52:8000", 
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins, # 프론트엔드 주소 허용
+    allow_origins=origins, 
     allow_credentials=True,
     allow_methods=["*"], # 모든 요청 방식 허용 (GET, POST 등)
     allow_headers=["*"], # 모든 헤더 허용
@@ -157,24 +146,17 @@ class PenaltyRequest(BaseModel):
 @app.get("/")
 def root():
     """서버 헬스 체크용 루트 엔드포인트"""
-    return {"message": "CoffeeChat Backend Running"}
+    return {"message": "CoffeeChat Backend Running cleanly!"}
 
 
+# =====================================================================
+# 🔑 카카오 인증 콜백 (auth 모듈과 밀접하게 결합되어 main에 유지)
+# =====================================================================
 @app.get("/login/kakao/callback")
-async def kakao_callback(code: str, db: Session = Depends(get_db)):
-    """
-    카카오 인증 콜백 수신 엔드포인트
-    인가 코드의 중복 사용으로 인한 400 에러 감지 시 이전 가입자 정보를 활용해 무한 로딩 루프를 원천 차단합니다.
-    """
-    provider_id = "4893673152"
-    email = None
-    name = "이승재"
-
+async def kakao_callback(code: str, db: Session = Depends(get_db)):    
+    
     try:
-        print(" [카카오 콜백 수신] 인가 코드 검증 및 프로세스 가동")
-
         try:
-            # 카카오 토큰 및 유저 정보 요청
             kakao_token = auth.get_kakao_token(code)
             kakao_user = auth.get_kakao_user_info(kakao_token)
 
@@ -182,8 +164,6 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
             email = kakao_user.get("kakao_account", {}).get("email") or f"{provider_id}@kakao.com"
             name = kakao_user.get("properties", {}).get("nickname") or "이승재"
         except Exception:
-            # 유효하지 않은 코드나 더블 서브밋 중복 감지 시, 마지막 가입자로 연동 우회 구조 발동
-            print(" [ 카카오 중복 요청 감지] 에러 무시 후 바로 직전 등록된 유저 기반 가드 구제 가동")
             last_user = db.query(User).order_by(User.id.desc()).first()
             if last_user:
                 provider_id = last_user.provider_id
@@ -194,7 +174,6 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
         is_new_user = False
 
         if not user:
-            print(f" [DEBUG] 찐 신규 유저 발견! DB 가입을 시작합니다. ID: {provider_id}")
             user = User(
                 email=email,
                 name=name,
@@ -206,33 +185,25 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
             db.refresh(user)
             is_new_user = True
         else:
-            # 타임존 비교 에러가 나지 않도록 표준 안전 비교 연산을 진행합니다.
             now = datetime.now(timezone.utc) if (user.created_at and user.created_at.tzinfo) else datetime.utcnow()
             user_created_time = user.created_at if user.created_at else now
-
             is_just_registered = (now - user_created_time) < timedelta(seconds=15)
 
             if is_just_registered or user.mbti is None or user.mbti == "":
-                print(" [리다이렉트 조건 충족] 신규 가입자 세션 유지 ➔ 프로필 설정 페이지로 유도")
                 is_new_user = True
 
         # JWT 세션 토큰 발행
         access_token = auth.create_access_token(data={"sub": user.email, "user_id": user.id})
-        safe_name = quote(user.name)
-        safe_email = quote(user.email)
-
+        
         if is_new_user:
-    # str(user.id)로 명확하게 감싸서 순수한 숫자만 주소창에 넘기도록 가드
             frontend_url = f"http://localhost:5173/profile-setup?token={access_token}&name={quote(user.name)}&email={quote(user.email)}&id={str(user.id)}"
         else:
-            # 기존 유저가 로그인할 때도 프론트엔드가 userId를 갱신할 수 있도록 주소창 뒤에 id를 확실하게 붙여줍니다.
             frontend_url = f"http://localhost:5173/?token={access_token}&name={quote(user.name)}&id={str(user.id)}"
-            print(f" [리다이렉트] 기존 진짜 회원 로그인 완료: {frontend_url}")
 
         return RedirectResponse(url=frontend_url, status_code=status.HTTP_302_FOUND)
 
     except Exception as e:
-        print(f" [ 카카오 콜백 최종 치명적 붕괴 에러]: {str(e)}")
+        print(f" [ 카카오 콜백 에러]: {str(e)}")
         return RedirectResponse(url="http://localhost:5173/login?error=true", status_code=status.HTTP_302_FOUND)
 
 
@@ -602,7 +573,7 @@ def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db))
 
     return {"message": "예약이 완료되었습니다.", "booking_id": booking.id}
 
-# 예약 목록 조회 API (날짜/시간 기준 자동 분류)
+# 예약 목록 조회 API (날짜/시간 기준 자동 분류 + 실제 멘토 이름 매핑 완결판)
 @app.get("/api/bookings/{user_id}")
 def get_bookings(user_id: int, db: Session = Depends(get_db)):
     print(f" [예약 목록 조회] User ID: {user_id}")
@@ -636,9 +607,14 @@ def get_bookings(user_id: int, db: Session = Depends(get_db)):
         else:
             tab_status = "completed"   # 종료
             
+        # 🟢 [정밀 수정] DBeaver 관계도 기준: booking의 mentor_id를 사용해 Mentor 테이블에서 실제 이름(name) 조회
+        mentor = db.query(Mentor).filter(Mentor.id == b.mentor_id).first()
+        real_mentor_name = mentor.name if mentor else f"멘토 #{b.mentor_id}"
+        
         result.append({
             "id": b.id,
             "mentor_id": b.mentor_id,
+            "mentor_name": real_mentor_name,  # <- "홍길동" 하드코딩 대신 디비의 실제 이름 안착!
             "user_id": b.user_id,
             "booking_date": str(b.booking_date),
             "booking_time": b.booking_time,
