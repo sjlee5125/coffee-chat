@@ -45,7 +45,7 @@ app.include_router(users.router)
 app.include_router(mentors.router)
 app.include_router(bookings.router)
 app.include_router(ai.router)
-app.include_router(notifications.router, prefix="/api")
+app.include_router(notifications.router)
 
 
 @app.get("/")
