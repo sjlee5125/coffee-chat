@@ -3,10 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from models import User, Mentor, Booking, MentorAvailability, get_db
 from schemas import BookingCreateRequest
-
-# 💡 위에서 만든 알림 매니저를 가져옵니다.
-from routers.notifications import manager 
-
+from app.api.endpoints.notifications import manager
 # 라우터 생성 (prefix를 지정해두면 아래에서 /api/booking 을 생략할 수 있습니다)
 router = APIRouter(
     prefix="/api/booking",
