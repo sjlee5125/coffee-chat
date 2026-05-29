@@ -24,7 +24,7 @@ origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://48.211.169.52",
-    "http://48.211.169.52:8000", 
+    "http://48.211.169.52:8003", 
 ]
 
 app.add_middleware(
@@ -113,4 +113,4 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
 # 서버 실행
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8003)
