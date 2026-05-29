@@ -4,10 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Header, WebSocket, WebSoc
 from sqlalchemy.orm import Session
 from typing import Dict
 import logging
-from models import get_db
+from models import get_db, Notification
 
 router = APIRouter()
-
+logger = logging.getLogger(__name__)
 # =====================================================================
 # 🚀 [웹소켓] 0.1초 실시간 알림 파이프라인 관리자
 # =====================================================================
