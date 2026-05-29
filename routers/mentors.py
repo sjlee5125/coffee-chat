@@ -94,9 +94,9 @@ def register_mentor(user_id: int, request: MentorRegisterRequest, db: Session = 
         db.add(mentor)
 
     mentor.name = request.name
-    mentor.status = request.status           # 추가
-    mentor.main_category = request.main_category # 추가
-    mentor.sub_category = request.sub_category   # 추가
+    mentor.status = request.status or ""
+    mentor.main_category = request.main_category or ""
+    mentor.sub_category = request.sub_category or ""
     mentor.job_title = request.job_title
     mentor.career_history = request.career_history
     mentor.mentor_intro = request.mentor_intro
