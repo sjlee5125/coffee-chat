@@ -2,11 +2,13 @@ import enum
 import socket
 from datetime import datetime
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Text,
+    create_engine, Column, Integer, String, Boolean, Text,
     Enum, DateTime, ForeignKey, Date, Boolean, func, UniqueConstraint
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+
+
 
 # ─── 1. 데이터베이스 연결 설정 ───
 hostname = socket.gethostname()
@@ -104,15 +106,15 @@ class MentorAvailability(Base):
 
 
 class Notification(Base):
-    """종 모양 알림 정보 보관용 테이블 (중복 라인 제거 및 외래키 정교화 버전)"""
     __tablename__ = "notifications"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = {'schema': 'public'} # 🌟 1. public 소속 추가!
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey('public.users.id'), nullable=False) 
-    message = Column(String(255), nullable=False)
-    is_read = Column(Boolean, default=False)
-    created_at = Column(DateTime, server_default=func.now())
+    # 🌟 2. users.id -> public.users.id 로 정확한 주소 명시!
+    user_id = Column(Integer, ForeignKey("public.users.id", ondelete="CASCADE")) 
+    message = Column(String(255)) 
+    is_read = Column(Boolean, default=False) 
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 # ─── 3. DB 헬퍼 및 제너레이터 ───
@@ -134,3 +136,6 @@ if __name__ == "__main__":
     print("테이블 구조 변경사항 반영 및 생성 시작...")
     create_tables()
     print("테이블 생성 및 동기화 작업 완료!")
+
+# 깃 강제 업데이트용 주석
+
