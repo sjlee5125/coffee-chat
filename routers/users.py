@@ -71,7 +71,7 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
         "mentoring_topics": m_topics,
         "detailed_experience": mentor.detailed_experience if mentor else "[]",
         "mentor_keywords": m_keywords,  # 💡 이제 새로고침해도 대화 키워드 잘 뜹니다!
-        "mentor_links": m_links 
+        "mentor_links": m_links ,
         "bio": getattr(user, "bio", "") or "",
         "mbti": getattr(user, "mbti", "") or "",
         "hashtags": getattr(user, "hashtags", "") or "",

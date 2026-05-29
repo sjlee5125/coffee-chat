@@ -1,21 +1,27 @@
 import os
-from datetime import datetime, timedelta, timezone
+import json
+from datetime import datetime, timedelta, timezone, date 
 from urllib.parse import quote
-from fastapi import FastAPI, Depends, status
+import asyncio
+from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from typing import Optional, Dict, List
 from dotenv import load_dotenv
+from openai import AzureOpenAI
+from auth import router
 
 import auth
-from models import User, get_db, create_tables
+from models import User, Mentor, Booking, MentorAvailability, ChatSession, get_db, create_tables
 
 # 💡 새로 분리한 기능별 라우터들을 가져옵니다.
 from routers import users, mentors, bookings, ai, notifications
 
 # 서버 실행 시 시스템의 .env 환경변수를 로드 및 DB 초기화
 load_dotenv()
-create_tables()
+#create_tables()
 
 app = FastAPI()
 
@@ -110,7 +116,7 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
         return RedirectResponse(url="http://localhost:5173/login?error=true", status_code=status.HTTP_302_FOUND)
 
 
-# 서버 실행
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

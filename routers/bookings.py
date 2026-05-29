@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from models import User, Mentor, Booking, MentorAvailability, Notification, get_db
 from routers.notifications import manager 
-
+from datetime import datetime, timedelta
 # 라우터 생성 (prefix를 지정해두면 아래에서 /api/booking 을 생략할 수 있습니다)
 router = APIRouter(
     prefix="/api/booking",
@@ -185,4 +185,54 @@ def get_mentee_bookings(user_id: int, db: Session = Depends(get_db)):
             "questions": b.questions,
             "status": b.status
         })
+@router.get("/api/bookings/{user_id}")
+def get_bookings(user_id: int, db: Session = Depends(get_db)):
+    print(f" [예약 목록 조회] User ID: {user_id}")
+    
+    bookings = db.query(Booking).filter(
+        Booking.user_id == user_id
+    ).order_by(Booking.booking_date.desc()).all()
+    
+    now = datetime.now()
+    result = []
+    
+    for b in bookings:
+        try:
+            booking_datetime = datetime.strptime(
+                f"{b.booking_date} {b.booking_time}", 
+                "%Y-%m-%d %H:%M"
+            )
+        except:
+            booking_datetime = datetime.strptime(
+                f"{b.booking_date} {b.booking_time}", 
+                "%Y-%m-%d %I:%M %p"
+            )
+        
+        # 시간 기준으로 상태 자동 분류
+        if now < booking_datetime - timedelta(minutes=5):
+            tab_status = "upcoming"
+        elif booking_datetime - timedelta(minutes=5) <= now <= booking_datetime + timedelta(minutes=30):
+            tab_status = "ongoing"
+        else:
+            tab_status = "completed"
+            
+        try:
+            mentor = db.query(Mentor).filter(Mentor.id == b.mentor_id).first()
+            real_mentor_name = mentor.name if mentor else f"멘토 #{b.mentor_id}"
+        except:
+            real_mentor_name = f"멘토 #{b.mentor_id}"
+        
+        result.append({
+            "id": b.id,
+            "mentor_id": b.mentor_id,
+            "mentor_name": real_mentor_name,
+            "user_id": b.user_id,
+            "booking_date": str(b.booking_date),
+            "booking_time": b.booking_time,
+            "questions": b.questions,
+            "status": b.status,
+            "tab_status": tab_status,
+            "created_at": str(b.created_at)
+        })
+    
     return result
