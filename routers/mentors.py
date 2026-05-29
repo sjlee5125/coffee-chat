@@ -10,22 +10,32 @@ router = APIRouter(tags=["Mentors"])
 @router.get("/api/mentors")
 def get_mentors(db: Session = Depends(get_db)):
     results = db.query(Mentor).all()
-    return [
-        {
+    
+    mentors_data = []
+    for m in results:
+        # 💡 1. Mentor 테이블에 있는 user_id를 이용해 User 테이블을 직접 검색합니다.
+        user_info = db.query(User).filter(User.id == m.user_id).first()
+        
+        # 💡 2. 유저 정보가 있고 사진도 있으면 URL을 가져오고, 아니면 빈칸("") 처리
+        profile_url = user_info.profile_image if user_info and user_info.profile_image else ""
+
+        mentors_data.append({
             "id": m.id,
             "name": m.name or "호스트",
-            "status": m.status or "현직자",        # 추가
-            "main_category": m.main_category or "", # 추가
-            "sub_category": m.sub_category or "",   # 추가
-            "avatar": "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400",
+            "status": m.status or "현직자",
+            "main_category": m.main_category or "",
+            "sub_category": m.sub_category or "",
             "price": m.price or "10,000 원",
             "job_title": m.job_title or "커리어 가이드",
             "techStack": ["백엔드", "인프라"],
-            "profile_image": m.user.profile_image if hasattr(m, 'user') and m.user else "",
+            
+            # 👇 기존의 avatar와 새로운 profile_image 모두에 찾아온 URL을 넣어줍니다. (프론트 에러 방지)
+            "avatar": profile_url,
+            "profile_image": profile_url,
+            
             "bio": m.mentor_intro or "반가워요!"
-        }
-        for m in results
-    ]
+        })
+    return mentors_data
 
 @router.get("/api/mentors/list")
 def get_mentors_list(db: Session = Depends(get_db)):
