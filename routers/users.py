@@ -5,14 +5,17 @@ from sqlalchemy.orm import Session
 from models import User, get_db
 from schemas import ProfileUpdateRequest
 from azure.storage.blob import BlobServiceClient
+from dotenv import load_dotenv
+
+load_dotenv()
 AZURE_CONNECTION_STRING = os.getenv("AZURE_CONNECTION_STRING")
 AZURE_CONTAINER_NAME = os.getenv("AZURE_CONTAINER_NAME")
+
 # 라우터 생성
 router = APIRouter(
     prefix="/api/user",
     tags=["Users"]
 )
-
 @router.get("/{user_id}")
 def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
     """일반 프로필 전체 데이터 조회 API"""
