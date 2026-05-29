@@ -51,7 +51,7 @@ def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db))
         MentorAvailability.date == request.date,
         MentorAvailability.time == request.time,
     ).delete()
-
+    
     db.commit()
     db.refresh(booking)
     print(f" [예약 생성 성공 완결] Booking ID: {booking.id} 매핑 데이터 세팅 완료")
