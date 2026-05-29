@@ -25,10 +25,11 @@ origins = [
     "http://127.0.0.1:5173",
     "http://48.211.169.52",
     "http://48.211.169.52:8000",
+    "http://localhost:8003"  
     "ws://localhost:8000",      # 웹소켓용 추가
     "ws://48.211.169.52:8000",  # 웹소켓용 추가 
 ]
-
+    
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins, 
