@@ -1,181 +1,65 @@
 import os
-import json
-from datetime import datetime, timedelta, timezone, date
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
-import base64
-import asyncio
-from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
-from typing import Optional, Dict, List
 from dotenv import load_dotenv
-from openai import AzureOpenAI
-from fastapi import Header
 
 import auth
+from models import User, get_db, create_tables
 
-# 디버그: auth.py 모듈이 로드된 실제 시스템 경로를 로그에 출력합니다.
-print(f"DEBUG: auth.py loaded from: {auth.__file__}")
-from auth import router
-from models import User, Mentor, Booking, MentorAvailability, get_db, create_tables
+# 💡 새로 분리한 기능별 라우터들을 가져옵니다.
+from routers import users, mentors, bookings, ai, notifications
 
-
-# 서버 실행 시 시스템의 .env 환경변수를 로드합니다.
+# 서버 실행 시 시스템의 .env 환경변수를 로드 및 DB 초기화
 load_dotenv()
-
-create_tables()
+#create_tables()
 
 app = FastAPI()
 
-# 카카오 인증 처리 및 토큰 핸들링을 위한 외부 라우터를 탑재합니다.
-app.include_router(router, prefix="/api/auth")
-
-# 💡 [CORS 설정] 자격 증명(allow_credentials=True) 승인을 위해 명시적인 오리진 리스트를 설계합니다.
+# 💡 [CORS 설정]
 origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://48.211.169.52",
-    "http://48.211.169.52:8000", # 백엔드 API 포트 주소도 명시적으로 허용하여 CORS 차단을 예방합니다.
+    "http://48.211.169.52:8000", 
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins, # 프론트엔드 주소 허용
+    allow_origins=origins, 
     allow_credentials=True,
-    allow_methods=["*"], # 모든 요청 방식 허용 (GET, POST 등)
-    allow_headers=["*"], # 모든 헤더 허용
+    allow_methods=["*"], 
+    allow_headers=["*"], 
 )
+    
+# =====================================================================
+# 🧩 라우터 블록 조립 구역 (여기서 모든 파일이 연결됩니다)
+# =====================================================================
+app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
+app.include_router(users.router)
+app.include_router(mentors.router)
+app.include_router(bookings.router)
+app.include_router(ai.router)
+app.include_router(notifications.router)
 
-# 콘솔 디버그: 현재 FastAPI 인스턴스에 탑재되어 실행 준비가 완료된 라우터 목록을 로깅합니다.
-print("--- [DEBUG] 등록된 라우터 경로 확인 ---")
-for route in app.routes:
-    if hasattr(route, "path"):
-        print(f"DEBUG: {route.path} | {getattr(route, 'methods', 'N/A')}")
-
-
-# Azure OpenAI 연동을 위한 환경 변수를 .env 파일로부터 가져옵니다.
-AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY")
-AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
-AZURE_DEPLOYMENT_NAME = os.getenv("AZURE_DEPLOYMENT_NAME")
-AZURE_API_VERSION = os.getenv("AZURE_API_VERSION")
-
-if not all([AZURE_OPENAI_KEY, AZURE_OPENAI_ENDPOINT, AZURE_DEPLOYMENT_NAME]):
-    print("⚠️ [경고] Azure OpenAI 환경 변수 중 일부가 .env 파일에 설정되지 않았습니다.")
-
-# Azure OpenAI 클라이언트를 초기화합니다.
-ai_client = AzureOpenAI(
-    api_key=AZURE_OPENAI_KEY,
-    api_version=AZURE_API_VERSION,
-    azure_endpoint=AZURE_OPENAI_ENDPOINT,
-)
-
-
-# --- [데이터 검증 스크마: Pydantic 영역] ---
-
-class UserRegisterRequest(BaseModel):
-    """일반 회원 최초 가입 시 프론트엔드에서 수신할 요청 가방 데이터 명세"""
-    email: str
-    password: str
-    role: str
-    name: str
-    bio: Optional[str] = None
-    mbti: Optional[str] = None
-    hashtags: Optional[str] = None
-    experience: Optional[str] = None
-    portfolio_url: Optional[str] = None
-    help_provide: Optional[str] = None
-    help_receive: Optional[str] = None
-    profile_image: Optional[str] = None
-
-
-class UserLoginRequest(BaseModel):
-    """일반 로그인 검증용 가방 데이터 명세"""
-    email: str
-    password: str
-
-
-class ProfileUpdateRequest(BaseModel):
-    """일반 회원 프로필 수정 처리 시 수신할 요청 가방 데이터 명세"""
-    name: str
-    bio: Optional[str] = None
-    mbti: Optional[str] = None
-    hashtags: Optional[str] = None
-    experience: Optional[str] = None
-    portfolio_url: Optional[str] = None
-    help_provide: Optional[str] = None
-    help_receive: Optional[str] = None
-    profile_image: Optional[str] = None
-
-
-class AIQuestionRequest(BaseModel):
-    """AI 질문 추천 어시스턴트 요청 시 수신할 메모 명세"""
-    memo: str
-
-
-class BookingCreateRequest(BaseModel):
-    mentorId: int
-    userId: int   # 💡 추가
-    date: date
-    time: str
-    questions: str
-
-
-class MentorRegisterRequest(BaseModel):
-    """
-    멘토 프로필 독립 등록/수정 시 프론트엔드에서 수신할 요청 가방 데이터 명세
-    DBeaver 데이터베이스 엔티티 관계도 스펙과 1:1 완벽 맵핑 설계
-    """
-    name: str
-    job_title: str
-    career_history: Optional[str] = None
-    mentor_intro: Optional[str] = None
-    mentoring_topics: Optional[str] = None
-    detailed_experience: Optional[str] = None
-    hashtags: Optional[str] = None
-    portfolio_url: Optional[str] = None
-    portfolio_file_path: Optional[str] = None  # attachedFiles 첨부파일명 저장용 칸
-
-
-# [신규] 일정 관련 요청 모델
-class AvailabilityBulkRequest(BaseModel):
-    """멘토 가용 시간 bulk 저장 요청 명세"""
-    mentor_id: int
-    schedules: Dict[str, List[str]]  # { "2026-05-23": ["09:00", "09:30"], ... }
-
-
-class PenaltyRequest(BaseModel):
-    """멘토 귀책 예약 취소(패널티) 처리 요청 명세"""
-    mentor_id: int
-    date: str   # "2026-05-23"
-    time: str   # "09:00"
-    reason: str
-
-
-# --- [API 라우터 비즈니스 로직 구역] ---
 
 @app.get("/")
 def root():
     """서버 헬스 체크용 루트 엔드포인트"""
-    return {"message": "CoffeeChat Backend Running"}
+    return {"message": "CoffeeChat Backend Running cleanly!"}
 
 
+# =====================================================================
+# 🔑 카카오 인증 콜백 (auth 모듈과 밀접하게 결합되어 main에 유지)
+# =====================================================================
 @app.get("/login/kakao/callback")
-async def kakao_callback(code: str, db: Session = Depends(get_db)):
-    """
-    카카오 인증 콜백 수신 엔드포인트
-    인가 코드의 중복 사용으로 인한 400 에러 감지 시 이전 가입자 정보를 활용해 무한 로딩 루프를 원천 차단합니다.
-    """
-    provider_id = "4893673152"
-    email = None
-    name = "이승재"
-
+async def kakao_callback(code: str, db: Session = Depends(get_db)):    
+    
     try:
-        print(" [카카오 콜백 수신] 인가 코드 검증 및 프로세스 가동")
-
         try:
-            # 카카오 토큰 및 유저 정보 요청
             kakao_token = auth.get_kakao_token(code)
             kakao_user = auth.get_kakao_user_info(kakao_token)
 
@@ -183,8 +67,6 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
             email = kakao_user.get("kakao_account", {}).get("email") or f"{provider_id}@kakao.com"
             name = kakao_user.get("properties", {}).get("nickname") or "이승재"
         except Exception:
-            # 유효하지 않은 코드나 더블 서브밋 중복 감지 시, 마지막 가입자로 연동 우회 구조 발동
-            print(" [ 카카오 중복 요청 감지] 에러 무시 후 바로 직전 등록된 유저 기반 가드 구제 가동")
             last_user = db.query(User).order_by(User.id.desc()).first()
             if last_user:
                 provider_id = last_user.provider_id
@@ -195,7 +77,6 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
         is_new_user = False
 
         if not user:
-            print(f" [DEBUG] 찐 신규 유저 발견! DB 가입을 시작합니다. ID: {provider_id}")
             user = User(
                 email=email,
                 name=name,
@@ -207,579 +88,29 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
             db.refresh(user)
             is_new_user = True
         else:
-            # 타임존 비교 에러가 나지 않도록 표준 안전 비교 연산을 진행합니다.
             now = datetime.now(timezone.utc) if (user.created_at and user.created_at.tzinfo) else datetime.utcnow()
             user_created_time = user.created_at if user.created_at else now
-
             is_just_registered = (now - user_created_time) < timedelta(seconds=15)
 
             if is_just_registered or user.mbti is None or user.mbti == "":
-                print(" [리다이렉트 조건 충족] 신규 가입자 세션 유지 ➔ 프로필 설정 페이지로 유도")
                 is_new_user = True
 
         # JWT 세션 토큰 발행
         access_token = auth.create_access_token(data={"sub": user.email, "user_id": user.id})
-        safe_name = quote(user.name)
-        safe_email = quote(user.email)
-
+        
         if is_new_user:
-    # str(user.id)로 명확하게 감싸서 순수한 숫자만 주소창에 넘기도록 가드
             frontend_url = f"http://localhost:5173/profile-setup?token={access_token}&name={quote(user.name)}&email={quote(user.email)}&id={str(user.id)}"
         else:
-            # 기존 유저가 로그인할 때도 프론트엔드가 userId를 갱신할 수 있도록 주소창 뒤에 id를 확실하게 붙여줍니다.
             frontend_url = f"http://localhost:5173/?token={access_token}&name={quote(user.name)}&id={str(user.id)}"
-            print(f" [리다이렉트] 기존 진짜 회원 로그인 완료: {frontend_url}")
 
         return RedirectResponse(url=frontend_url, status_code=status.HTTP_302_FOUND)
 
     except Exception as e:
-        print(f" [ 카카오 콜백 최종 치명적 붕괴 에러]: {str(e)}")
+        print(f" [ 카카오 콜백 에러]: {str(e)}")
         return RedirectResponse(url="http://localhost:5173/login?error=true", status_code=status.HTTP_302_FOUND)
 
 
-@app.get("/api/user/{user_id}")
-def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
-    """
-    일반 프로필 전체 데이터 조회 API
-    DBeaver 데이터베이스 관계도 상의 portfolio_file_path 정보까지 유실 없이 완벽하게 프론트로 전달합니다.
-    """
-    print(f" [유저 전체 프로필 조회 요청] User ID: {user_id}")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="존재하지 않는 사용자입니다.")
-
-    return {
-        "id": user.id,
-        "email": user.email,
-        "name": user.name,
-        "bio": getattr(user, "bio", "") or "",
-        "mbti": getattr(user, "mbti", "") or "",
-        "hashtags": getattr(user, "hashtags", "") or "",
-        "experience": getattr(user, "experience", "") or "",
-        "portfolio_url": getattr(user, "portfolio_url", "") or "",
-        "portfolio_file_path": getattr(user, "portfolio_file_path", "") or "",
-        "help_provide": getattr(user, "help_provide", "") or "",
-        "help_receive": getattr(user, "help_receive", "") or "",
-        "profile_image": getattr(user, "profile_image", "") or "",
-    }
-
-@app.post("/api/mentor/availability/bulk")
-def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Depends(get_db)):
-    """
-    멘토가 설정한 available 슬롯을 bulk upsert합니다.
-    - 요청에 포함된 날짜는 기존 available 삭제 후 새로 insert (날짜 단위 교체)
-    - booked 슬롯은 Booking 테이블에 있으므로 건드리지 않습니다.
-    """
-    print(f" [가용 시간 저장] Mentor ID: {request.mentor_id}, 날짜 수: {len(request.schedules)}")
-
-    for date_str, times in request.schedules.items():
-        # 해당 날짜의 기존 available 슬롯 삭제
-        db.query(MentorAvailability).filter(
-            MentorAvailability.mentor_id == request.mentor_id,
-            MentorAvailability.date == date_str,
-        ).delete()
-
-        # 새 슬롯 insert
-        for time in times:
-            slot = MentorAvailability(
-                mentor_id=request.mentor_id,
-                date=date_str,
-                time=time,
-            )
-            db.add(slot)
-
-    db.commit()
-    print(f" [가용 시간 저장 완료] Mentor ID: {request.mentor_id}")
-    return {"message": "가용 시간이 저장되었습니다."}
-
-
-# =====================================================================
-# [신규] 멘토 가용 시간 관련 엔드포인트
-# =====================================================================
-
-@app.get("/api/mentor/availability/{mentor_id}")
-def get_mentor_availability(mentor_id: int, db: Session = Depends(get_db)):
-    # 1. 멘토 고유 일련번호(id)로 먼저 찾고, 없으면 호환성을 위해 user_id 매핑 체킹
-    mentor = db.query(Mentor).filter(Mentor.id == mentor_id).first()
-    if not mentor:
-        mentor = db.query(Mentor).filter(Mentor.user_id == mentor_id).first()
-    
-    if not mentor:
-        raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
-
-    today = date.today()
-
-    # 💡 [교정 핵심] mentor_id(6번)나 user_id(13번) 둘 중 어떤 것으로 저장되어 있든 상관없이 다 긁어오도록 OR(|) 필터 지정!
-    availability_rows = db.query(MentorAvailability).filter(
-        (MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id),
-        MentorAvailability.date >= today
-    ).all()
-
-    # 💡 예약 내역 조회도 동일하게 양쪽 ID 체계를 모두 교차 지원하도록 가드를 확장합니다.
-    booking_rows = db.query(Booking).filter(
-        (Booking.mentor_id == mentor.id) | (Booking.mentor_id == mentor.user_id),
-        Booking.booking_date >= today,
-        Booking.status == "PAID"
-    ).all()
-
-    # 3. 프론트 형태에 맞게 { "YYYY-MM-DD": { "HH:MM": "available/booked" } } 로 조립
-    result: Dict[str, Dict[str, str]] = {}
-
-    for row in availability_rows:
-        date_key = str(row.date)
-        if date_key not in result:
-            result[date_key] = {}
-        result[date_key][row.time] = "available"
-
-    for row in booking_rows:
-        date_key = str(row.booking_date)
-        if date_key not in result:
-            result[date_key] = {}
-        result[date_key][row.booking_time] = "booked"
-
-    return result
-
-
-# 💡 [신규 추가] 특정 유저의 분리형 멘토 상세 정보를 조회하는 API
-@app.get("/api/mentor/details/{user_id}")
-def get_mentor_details(user_id: int, db: Session = Depends(get_db)):
-    print(f" [멘토 프로필 상세 조회 요청] User ID: {user_id}")
-    
-    # 1. 공통 정보 추출을 위해 users 테이블 조회
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="존재하지 않는 사용자 회원입니다.")
-        
-    # 2. 독립형 멘토 전용 정보 조회를 위해 mentors 테이블 조회
-    mentor = db.query(Mentor).filter(Mentor.user_id == user_id).first()
-    if not mentor:
-        raise HTTPException(status_code=404, detail="해당 사용자는 멘토로 등록되어 있지 않습니다.")
-        
-    # 3. 양쪽 테이블의 정보를 통합하여 프론트엔드가 요구하는 포맷으로 반환
-    return {
-        "id": mentor.id,
-        "user_id": mentor.user_id,
-        "name": mentor.name or user.name,
-        "profile_image": user.profile_image or "",
-        "job_title": mentor.job_title,
-        "career_history": mentor.career_history,
-        "mentor_intro": mentor.mentor_intro,
-        "mentoring_topics": mentor.mentoring_topics,
-        "detailed_experience": mentor.detailed_experience,
-        "price": mentor.price or "10,000 원",
-    }
-
-
-@app.put("/api/user/profile/{user_id}")
-def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session = Depends(get_db)):
-    """일반 프로필 수정 정보 DB 영구 업데이트 처리 API"""
-    print(f" [프로필 업데이트 요청 접수] User ID: {user_id}")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="존재하지 않는 사용자입니다.")
-
-    user.name = request.name
-    user.bio = request.bio
-    user.mbti = request.mbti
-    user.hashtags = request.hashtags
-    user.experience = request.experience
-    user.portfolio_url = request.portfolio_url
-    user.help_provide = request.help_provide
-    user.help_receive = request.help_receive
-
-    if request.profile_image:
-        user.profile_image = request.profile_image
-
-    db.commit()
-    print(f" [DB 반영 성공] 유저 {user_id}번 프로필 영구 업데이트 저장 완료")
-
-    return {"message": "프로필 정보가 성공적으로 바인딩되었습니다."}
-
-
-@app.post("/api/mentor/register/{user_id}")
-def register_mentor(user_id: int, request: MentorRegisterRequest, db: Session = Depends(get_db)):
-    """
-    분리형 독립 멘토 등록 처리 API
-    프론트에서 수신한 이름, 태그, 포트폴리오 정보를 Users 테이블 관계도 컬럼에 완벽 연동 안착시킵니다.
-    """
-    print(f" [분리형 멘토 등록 시작] User ID: {user_id}")
-
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="존재하지 않는 회원 데이터입니다.")
-
-    # 🟢 DBeaver 관계도 컬럼 스펙에 이름/해시태그/링크/파일경로 1:1 정밀 바인딩 가동
-    user.name = request.name
-    user.hashtags = request.hashtags
-    user.portfolio_url = request.portfolio_url          
-    user.portfolio_file_path = request.portfolio_file_path  
-
-    mentor = db.query(Mentor).filter(Mentor.user_id == user_id).first()
-
-    if not mentor:
-        print(" ➔ 기존 멘토 레코드 없음: 새롭게 생성")
-        mentor = Mentor(user_id=user_id)
-        db.add(mentor)
-
-    # 🟢 독립 멘토 세부 테이블 데이터 정보 매핑
-    mentor.name = request.name
-    mentor.job_title = request.job_title
-    mentor.career_history = request.career_history
-    mentor.mentor_intro = request.mentor_intro
-    mentor.mentoring_topics = request.mentoring_topics
-    mentor.detailed_experience = request.detailed_experience
-
-    db.commit()
-    print(f" [DB 분리 저장 완료] {user_id}번 유저의 이름, 링크, 파일경로가 Users 테이블에 완전히 영구 저장 완결되었습니다.")
-
-    return {"message": "멘토 프로필 독립 등록 완료"}
-
-
-@app.get("/api/mentor/dashboard/{user_id}")
-def get_mentor_dashboard_data(user_id: int, db: Session = Depends(get_db)):
-    """멘토 대시보드 내 실시간 활동 지표 조회 API"""
-    print(f" [대시보드 데이터 요청 접수] User ID: {user_id}")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="존재하지 않는 사용자입니다.")
-
-    stats_data = {
-        "name": user.name,
-        "total_chats": getattr(user, "total_chats", 127),
-        "total_earnings": getattr(user, "total_earnings", 9525),
-        "average_rating": getattr(user, "average_rating", 4.9),
-        "mentoring_hours": getattr(user, "mentoring_hours", 63.5),
-    }
-
-    return {
-        "stats": stats_data,
-        "upcoming_chats": [],
-    }
-
-
-@app.post("/api/ai/generate-questions")
-async def generate_ai_questions(request: AIQuestionRequest):
-    """Azure OpenAI를 사용한 커피챗 대화 추천 질문 자동 생성 API"""
-    print(f" [AI 질문 생성 요청 접수] 메모 내용: {request.memo}")
-
-    if not request.memo.strip():
-        raise HTTPException(status_code=400, detail="메모 내용이 비어 있습니다.")
-
-    try:
-        system_prompt = (
-            "당신은 커리어 멘토링 서비스의 질문 추천 AI 어시스턴트입니다. "
-            "사용자가 멘토에게 질문하고 싶은 내용을 두서없이 작성한 '메모'를 주면, "
-            "그 내용을 명확하고 전문적인 멘토링 질문 리스트(최대 3~4개)로 정제하여 답변해야 합니다. "
-            "답변 서론이나 결론(예: '여기 질문입니다' 등)은 모두 제외하고, "
-            "사용자가 바로 복사해서 쓸 수 있게 정제된 질문 리스트만 번호(1., 2., 3.) 형태로 줄바꿈하여 출력하세요."
-        )
-
-        user_prompt = f"사용자 메모:\n{request.memo}"
-
-        response = ai_client.chat.completions.create(
-            model=AZURE_DEPLOYMENT_NAME,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}, # 💡 정석 매핑 역할인 user 역할 바인딩
-            ],
-            temperature=0.7,
-            max_tokens=1000,
-        )
-
-        suggested_questions = response.choices[0].message.content.strip()
-        print(" [AI 질문 생성 성공] 응답 데이터 반환 완료")
-
-        return {"aiQuestions": suggested_questions}
-
-    except Exception as e:
-        print(f" [Azure OpenAI 에러 발생]: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"AI 질문 생성 중 내부 오류가 발생했습니다: {str(e)}",
-        )
-
-
-# =====================================================================
-# 💡 [정밀 수정] 멘토 전체 목록 조회 API (일반 유저 완벽 컷 차단 버전)
-# =====================================================================
-@app.get("/api/mentors")
-def get_mentors(db: Session = Depends(get_db)):
-    # 🟢 조인(join)을 아예 제거했습니다. 오직 Mentor 테이블 데이터만 가져옵니다.
-    results = db.query(Mentor).all()
-    
-    return [
-        {
-            "id": m.id,
-            "name": m.name or "멘토",
-            "avatar": "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400", # 기본 이미지
-            "price": m.price or "10,000 원",
-            "job_title": m.job_title or "커리어 가이드",
-            "techStack": ["백엔드", "인프라"], # 필요 시 m.mentoring_topics 활용 가능
-            "bio": m.mentor_intro or "반가워요!"
-        }
-        for m in results
-    ]
-
-@app.get("/api/mentors/list")
-def get_mentors_list(db: Session = Depends(get_db)):
-    print(" [멘토 전체 리스트 조회 API 호출]")
-    
-    # Mentor 테이블과 User 테이블을 user_id 기준으로 조인(Join)하여 한 번에 조회합니다.
-    results = db.query(Mentor, User).join(User, Mentor.user_id == User.id).all()
-    
-    mentors_data = []
-    for mentor, user in results:
-        mentors_data.append({
-            "id": mentor.user_id, # 상세 페이지 라우팅을 위해 user_id 반환
-            "name": mentor.name,
-            "job_title": mentor.job_title or "직무 미상",
-            "hashtags": getattr(user, "hashtags", "") or "",
-            "profile_image": getattr(user, "profile_image", "") or "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400"
-        })
-        
-    return mentors_data
-
-# =====================================================================
-# 💡 [정밀 추가] 멘토 개별 상세 조회 API (Undefined Column 에러 근본적 해결)
-# =====================================================================
-@app.get("/api/mentors/{mentor_id}")
-def get_mentor_detail(mentor_id: int, db: Session = Depends(get_db)):
-    mentor = db.query(Mentor).filter(Mentor.id == mentor_id).first()
-    if not mentor:
-        raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
-    
-    return {
-        "id": mentor.id,
-        "name": mentor.name or "멘토",
-        "job_title": mentor.job_title or "직무 미정",
-        "mentor_intro": mentor.mentor_intro or "<p>소개글이 없습니다.</p>",
-        # 💡 None이면 빈 리스트 []를 보내도록 수정
-        "career_history": mentor.career_history or [],
-        "mentoring_topics": mentor.mentoring_topics or [],
-        "detailed_experience": mentor.detailed_experience or [],
-        "profile_image": "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400"
-    }
-
-@app.post("/api/booking/create")
-def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db)):
-    """멘티의 커피챗 예약 생성 API"""
-    print(f" [예약 생성 요청] mentor_id={request.mentorId}, date={request.date}, time={request.time}")
-
-    # 1. mentors 테이블의 고유 id(PK)로 멘토 엔티티를 정밀 타겟팅합니다.
-    mentor = db.query(Mentor).filter(Mentor.id == request.mentorId).first()
-    if not mentor:
-        # 프론트가 혹시 user_id를 보냈을 경우를 대비한 유연한 2차 가드 필터링
-        mentor = db.query(Mentor).filter(Mentor.user_id == request.mentorId).first()
-    
-    if not mentor:
-        raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
-
-    # 2. 중복 예약 확인
-    existing = db.query(Booking).filter(
-        Booking.mentor_id == mentor.id,
-        Booking.booking_date == request.date,
-        Booking.booking_time == request.time,
-        Booking.status == "PAID"
-    ).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="이미 예약된 시간입니다.")
-
-    # 3. 예약 생성
-    booking = Booking(
-        mentor_id=mentor.id,
-        user_id=request.userId, # 💡 추가
-        booking_date=request.date,
-        booking_time=request.time,
-        questions=request.questions,
-        status="PAID"
-    )
-    db.add(booking)
-
-    # 4. MentorAvailability에서 해당 슬롯 삭제 (예약되면 더 이상 available 아님)
-    db.query(MentorAvailability).filter(
-        MentorAvailability.mentor_id == mentor.id,
-        MentorAvailability.date == request.date,
-        MentorAvailability.time == request.time,
-    ).delete()
-
-    db.commit()
-    db.refresh(booking)
-    print(f" [예약 생성 완료] Booking ID: {booking.id}")
-    return {"message": "예약이 완료되었습니다.", "booking_id": booking.id}
-    asyncio.create_task(manager.send_personal_message(
-        {"type": "NEW_NOTIFICATION", "message": "🎉 새로운 커피챗 예약 요청이 도착했습니다!"}, 
-        mentor.user_id
-    ))
-
-    return {"message": "예약이 완료되었습니다.", "booking_id": booking.id}
-
-# =====================================================================
-# 💡 [신규/보완] 멘토 가용 시간 Bulk 저장 (ID 꼬임 완전 방지 가드 탑재)
-# =====================================================================
-@app.post("/api/mentor/availability/bulk")
-def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Depends(get_db)):
-    print(f" [가용 시간 bulk 저장 시작] 수신된 ID 파라미터: {request.mentor_id}")
-
-    # 인입된 ID가 유저 ID일지, 멘토 ID일지 모르기 때문에 둘 다 교차 검증을 가동합니다.
-    mentor = db.query(Mentor).filter(Mentor.id == request.mentor_id).first()
-    if not mentor:
-        mentor = db.query(Mentor).filter(Mentor.user_id == request.mentor_id).first()
-        
-    if not mentor:
-        raise HTTPException(status_code=404, detail="등록된 멘토 프로필을 찾을 수 없습니다.")
-
-    # 멘토의 진짜 고유 고정 PK(id)를 기준으로 가용 시간 데이터를 인서트합니다.
-    real_mentor_id = mentor.id
-
-    for date_str, times in request.schedules.items():
-        # 기존 해당 날짜 슬롯을 클리어 한 후 재인서트 (Upsert 구현)
-        db.query(MentorAvailability).filter(
-            MentorAvailability.mentor_id == real_mentor_id,
-            MentorAvailability.date == date_str,
-        ).delete()
-
-        for time_str in times:
-            slot = MentorAvailability(
-                mentor_id=real_mentor_id,
-                date=date_str,
-                time=time_str,
-            )
-            db.add(slot)
-
-    db.commit()
-    print(f" [성공] 멘토 {mentor.name} (PK: {real_mentor_id}) 가용 일정 bulk 덤프 완료")
-    return {"message": "가용 시간이 성공적으로 저장되었습니다."}
-
-
-@app.post("/api/mentor/penalty")
-def apply_mentor_penalty(request: PenaltyRequest, db: Session = Depends(get_db)):
-    """
-    멘토가 예약 확정(booked) 슬롯을 취소할 때 호출됩니다.
-    - Booking 상태를 CANCELLED로 변경
-    - penalty_applied = True, cancelled_by = "mentor" 기록
-    - MentorAvailability에서 해당 슬롯 삭제
-    """
-    print(f" [패널티 처리] Mentor ID: {request.mentor_id}, {request.date} {request.time}")
-
-    # 해당 예약 조회
-    booking = db.query(Booking).filter(
-        Booking.mentor_id == request.mentor_id,
-        Booking.booking_date == request.date,
-        Booking.booking_time == request.time,
-        Booking.status == "PAID",
-    ).first()
-
-    if not booking:
-        raise HTTPException(status_code=404, detail="해당 예약을 찾을 수 없습니다.")
-
-    # 패널티 처리
-    booking.status = "CANCELLED"
-    booking.penalty_applied = True
-    booking.cancelled_at = datetime.utcnow()
-    booking.cancelled_by = "mentor"
-
-    # MentorAvailability에서도 해당 슬롯 제거
-    db.query(MentorAvailability).filter(
-        MentorAvailability.mentor_id == request.mentor_id,
-        MentorAvailability.date == request.date,
-        MentorAvailability.time == request.time,
-    ).delete()
-
-    db.commit()
-    print(f" [패널티 처리 완료] Booking ID: {booking.id}")
-    return {"message": "예약이 취소되었으며 패널티가 부여되었습니다.", "booking_id": booking.id}
-
-
-@router.get("/api/mentors/{mentor_id}")
-def get_mentor_summary(mentor_id: int, db: Session = Depends(get_db)):
-    mentor = db.query(Mentor).filter(Mentor.id == mentor_id).first()
-    if not mentor:
-        raise HTTPException(status_code=404, detail="멘토를 찾을 수 없습니다.")
-    
-    user = db.query(User).filter(User.id == mentor.user_id).first()
-    
-    return {
-        "name": mentor.name,
-        "job_title": mentor.job_title,
-        "price": mentor.price,
-        "profile_image": user.profile_image if user else None # 썸네일용
-    }
-
-# 디버그: 시스템 구동 완료 로그 및 포트 매핑 확인
-print(f"--- [DEBUG] 현재 등록된 라우터 개수: {len(app.routes)} ---")
-for route in app.routes:
-    print(f"DEBUG: 경로 정보 -> {route.path} | {getattr(route, 'methods', 'N/A')}")
-
-# =====================================================================
-# 🔔 [알림 API 1] 내 알림 목록 실시간 조회 (더미 API ➔ 진짜 API로 교체!)
-# =====================================================================
-@app.get("/api/notifications")
-def get_user_notifications(Authorization: str = Header(None), db: Session = Depends(get_db)):
-    """프론트엔드 헤더가 10초마다 요청하는 진짜 실시간 알림 조회 API"""
-    if not Authorization:
-        return []
-    
-    try:
-        from models import Notification
-        
-        # 1. Bearer 토큰에서 진짜 토큰 글자만 추출
-        token = Authorization.replace("Bearer ", "")
-        
-        # 2. 💡 라이브러리 충돌(jwt 에러)을 막기 위해 Base64로 페이로드(내용)만 100% 안전하게 디코딩
-        payload_b64 = token.split('.')[1]
-        payload_b64 += '=' * (4 - len(payload_b64) % 4) # Base64 패딩 처리
-        payload = json.loads(base64.b64decode(payload_b64).decode('utf-8'))
-        
-        user_id = payload.get("user_id")
-        if not user_id:
-            return []
-
-        # 3. 내 유저 ID로 온 알림을 최신순으로 가져오기 (최근 20개까지만!)
-        notifications = db.query(Notification).filter(
-            Notification.user_id == user_id
-        ).order_by(Notification.created_at.desc()).limit(20).all()
-        
-        # 4. 프론트가 딱 원하는 모양으로 포장해서 반환
-        return [
-            {
-                "id": n.id,
-                "message": n.message,
-                "is_read": n.is_read,
-                # 날짜를 프론트가 읽기 편한 문자열로 변환
-                "created_at": n.created_at.isoformat() if n.created_at else None 
-            }
-            for n in notifications
-        ]
-    except Exception as e:
-        print(f"❌ [알림 조회 에러]: {e}")
-        return []
-
-
-# =====================================================================
-# 🔔 [알림 API 2] 알림 클릭 시 빨간불 끄기 (읽음 처리)
-# =====================================================================
-@app.put("/api/notifications/{notification_id}/read")
-def mark_notification_as_read(notification_id: int, db: Session = Depends(get_db)):
-    """알림 드롭다운에서 특정 알림을 클릭했을 때 읽음(is_read=True) 처리하는 API"""
-    try:
-        from models import Notification
-        
-        # 1. 클릭한 그 알림을 DB에서 찾기
-        notif = db.query(Notification).filter(Notification.id == notification_id).first()
-        if not notif:
-            raise HTTPException(status_code=404, detail="알림을 찾을 수 없습니다.")
-        
-        # 2. 빨간불 끄기! (DB에 저장)
-        notif.is_read = True
-        db.commit()
-        
-        return {"message": "성공적으로 읽음 처리되었습니다."}
-        
-    except Exception as e:
-        print(f"❌ [알림 읽음 처리 에러]: {e}")
-        raise HTTPException(status_code=500, detail="알림 처리 중 오류가 발생했습니다.")
+# 서버 실행
 if __name__ == "__main__":
     import uvicorn
-    
-    # 백엔드 서버를 0.0.0.0 IP 대역의 8000번 포트로 구동시킵니다.
     uvicorn.run(app, host="0.0.0.0", port=8000)
