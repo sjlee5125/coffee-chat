@@ -21,6 +21,7 @@ def get_mentors(db: Session = Depends(get_db)):
             "price": m.price or "10,000 원",
             "job_title": m.job_title or "커리어 가이드",
             "techStack": ["백엔드", "인프라"],
+            "profile_image": m.user.profile_image if hasattr(m, 'user') and m.user else "",
             "bio": m.mentor_intro or "반가워요!"
         }
         for m in results
