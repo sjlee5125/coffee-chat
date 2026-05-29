@@ -55,6 +55,9 @@ class MentorRegisterRequest(BaseModel):
     DBeaver 데이터베이스 엔티티 관계도 스펙과 1:1 완벽 맵핑 설계
     """
     name: str
+    status: str             # 추가
+    main_category: str      # 추가
+    sub_category: str       # 추가
     job_title: str
     career_history: Optional[str] = None
     mentor_intro: Optional[str] = None

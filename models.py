@@ -67,7 +67,10 @@ class Mentor(Base):
     career_history = Column(Text, nullable=True)   
     mentor_intro = Column(Text, nullable=True)             
     mentoring_topics = Column(Text, nullable=True)         
-    detailed_experience = Column(Text, nullable=True)      
+    detailed_experience = Column(Text, nullable=True)
+    status = Column(String(50), nullable=True)        # '현직자', '취준생' 등
+    main_category = Column(String(100), nullable=True) # '개발/엔지니어링'
+    sub_category = Column(String(100), nullable=True)  # '백엔드' 등      
 
 
 class Booking(Base):

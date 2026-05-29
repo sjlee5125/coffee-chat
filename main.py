@@ -15,7 +15,7 @@ from routers import users, mentors, bookings, ai, notifications
 
 # 서버 실행 시 시스템의 .env 환경변수를 로드 및 DB 초기화
 load_dotenv()
-#create_tables()
+create_tables()
 
 app = FastAPI()
 
@@ -24,9 +24,12 @@ origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://48.211.169.52",
-    "http://48.211.169.52:8000", 
+    "http://48.211.169.52:8000",
+    "http://localhost:8003"  
+    "ws://localhost:8000",      # 웹소켓용 추가
+    "ws://48.211.169.52:8000",  # 웹소켓용 추가 
 ]
-
+    
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins, 

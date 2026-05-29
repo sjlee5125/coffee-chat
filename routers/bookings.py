@@ -60,7 +60,7 @@ async def create_booking(request: BookingCreateRequest, db: Session = Depends(ge
         MentorAvailability.date == request.date,
         MentorAvailability.time == request.time,
     ).delete()
-
+    
     db.commit()
     db.refresh(booking)
     print(f" [예약 생성 성공 완결] Booking ID: {booking.id} 매핑 데이터 세팅 완료")
@@ -133,18 +133,19 @@ async def confirm_booking(booking_id: int, db: Session = Depends(get_db)):
         print(f"❌ [알림 전송 실패]: {str(ws_err)}")
     
     return {"message": "커피챗 예약이 최종 확정되었습니다."}
-
-
-# ==========================================================
-# 3. 멘토 대시보드 예약 조회
-# ==========================================================
 @router.get("/mentor/{mentor_id}")
 def get_mentor_bookings(mentor_id: int, db: Session = Depends(get_db)):
-    """멘토 대시보드 예약 내역 조회 API"""
+    """
+    멘토 대시보드 예약 내역 페이지에 띄울 데이터를 조회합니다.
+    (멘토 ID를 기준으로 해당 멘토에게 들어온 모든 예약 신청을 가져옵니다.)
+    """
+    # 멘토가 User 테이블의 id를 쓰고 있는지 Mentor 테이블의 id를 쓰고 있는지에 맞춰 조회
     mentor = db.query(Mentor).filter((Mentor.id == mentor_id) | (Mentor.user_id == mentor_id)).first()
     
+    # ❌ 404 에러를 던지던 로직 삭제
+    # ✅ 멘토가 아니면 에러 대신 조용히 빈 리스트([])를 반환합니다.
     if not mentor:
-        raise HTTPException(status_code=404, detail="멘토 정보를 찾을 수 없습니다.")
+        return []
 
     bookings = db.query(Booking).filter(
         (Booking.mentor_id == mentor.id) | (Booking.mentor_id == mentor.user_id)
@@ -157,9 +158,31 @@ def get_mentor_bookings(mentor_id: int, db: Session = Depends(get_db)):
             "booking_id": b.id,
             "mentee_name": mentee.name if mentee else "익명 크루",
             "mentee_image": mentee.profile_image if mentee and hasattr(mentee, 'profile_image') else None,
-            "candidate_times": f"['{b.booking_time}']", 
+           "booking_date": str(b.booking_date) if b.booking_date else "", 
+            "booking_time": str(b.booking_time) if b.booking_time else "",
+            "candidate_times": f"{b.booking_date} {b.booking_time}",
             "questions": b.questions,
             "status": b.status
         })
-    
+    return result
+
+@router.get("/mentee/{user_id}")
+def get_mentee_bookings(user_id: int, db: Session = Depends(get_db)):
+    bookings = db.query(Booking).filter(Booking.user_id == user_id).all()
+
+    result = []
+    for b in bookings:
+        mentor = db.query(Mentor).filter(Mentor.id == b.mentor_id).first()
+        mentor_user = db.query(User).filter(User.id == mentor.user_id).first() if mentor else None
+        
+        result.append({
+            "booking_id": b.id,
+            "partner_name": mentor.name if mentor else "알 수 없는 멘토",
+            "partner_image": mentor_user.profile_image if mentor_user and hasattr(mentor_user, 'profile_image') else None,
+            "booking_date": str(b.booking_date) if b.booking_date else "", 
+            "booking_time": str(b.booking_time) if b.booking_time else "",
+            "candidate_times": f"{b.booking_date} {b.booking_time}", 
+            "questions": b.questions,
+            "status": b.status
+        })
     return result
