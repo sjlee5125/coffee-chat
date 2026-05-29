@@ -27,7 +27,7 @@ origins = [
     "http://48.211.169.52:8003",
     "http://localhost:8003" 
 ]
-
+    
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins, 
