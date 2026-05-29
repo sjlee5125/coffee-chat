@@ -111,6 +111,21 @@ class Notification(Base):
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime, server_default=func.now())
 
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+    __table_args__ = {'schema': 'public'}
+
+    id = Column(Integer, primary_key=True, index=True)
+    booking_id = Column(Integer, nullable=True)
+    mentor_id = Column(Integer, nullable=True)
+    user_id = Column(Integer, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    ended_at = Column(DateTime, nullable=True)
+    duration_sec = Column(Integer, nullable=True)
+    stt_text = Column(Text, nullable=True)
+    ai_summary = Column(Text, nullable=True)
+    status = Column(String(20), default="READY")
+    created_at = Column(DateTime, server_default=func.now())
 
 # ─── 3. DB 헬퍼 및 제너레이터 ───
 

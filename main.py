@@ -1,14 +1,20 @@
 import os
-from datetime import datetime, timedelta, timezone
+import json
+from datetime import datetime, timedelta, timezone, date 
 from urllib.parse import quote
-from fastapi import FastAPI, Depends, status
+import asyncio
+from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from typing import Optional, Dict, List
 from dotenv import load_dotenv
+from openai import AzureOpenAI
+from auth import router
 
 import auth
-from models import User, get_db, create_tables
+from models import User, Mentor, Booking, MentorAvailability, ChatSession, get_db, create_tables
 
 # 💡 새로 분리한 기능별 라우터들을 가져옵니다.
 from routers import users, mentors, bookings, ai, notifications
@@ -103,7 +109,6 @@ class AIQuestionRequest(BaseModel):
 
 class BookingCreateRequest(BaseModel):
     mentorId: int
-    userId: int
     date: date
     time: str
     questions: str
@@ -608,8 +613,11 @@ def get_bookings(user_id: int, db: Session = Depends(get_db)):
             tab_status = "completed"   # 종료
             
         # 🟢 [정밀 수정] DBeaver 관계도 기준: booking의 mentor_id를 사용해 Mentor 테이블에서 실제 이름(name) 조회
-        mentor = db.query(Mentor).filter(Mentor.id == b.mentor_id).first()
-        real_mentor_name = mentor.name if mentor else f"멘토 #{b.mentor_id}"
+        try:
+            mentor = db.query(Mentor).filter(Mentor.id == b.mentor_id).first()
+            real_mentor_name = mentor.name if mentor else f"멘토 #{b.mentor_id}"
+        except:
+            real_mentor_name = f"멘토 #{b.mentor_id}"
         
         result.append({
             "id": b.id,
@@ -625,6 +633,76 @@ def get_bookings(user_id: int, db: Session = Depends(get_db)):
         })
     
     return result
+
+# 커피챗 세션 시작 API
+@app.post("/api/chat-session/start")
+def start_chat_session(booking_id: int, db: Session = Depends(get_db)):
+    print(f" [커피챗 세션 시작] Booking ID: {booking_id}")
+    
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="예약 정보를 찾을 수 없어요")
+    
+    # 이미 세션 있는지 확인
+    existing = db.query(ChatSession).filter(
+        ChatSession.booking_id == booking_id
+    ).first()
+    
+    if existing:
+        return {"session_id": existing.id, "status": existing.status}
+    
+    # 새 세션 생성
+    session = ChatSession(
+        booking_id=booking_id,
+        mentor_id=booking.mentor_id,
+        user_id=booking.user_id,
+        status="ONGOING",
+        started_at=datetime.now()
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    
+    return {"session_id": session.id, "status": session.status}
+
+# 커피챗 세션 종료 API
+@app.post("/api/chat-session/end/{session_id}")
+def end_chat_session(session_id: int, db: Session = Depends(get_db)):
+    print(f" [커피챗 세션 종료] Session ID: {session_id}")
+    
+    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없어요")
+    
+    now = datetime.now()
+    session.status = "COMPLETED"
+    session.ended_at = now
+    
+    if session.started_at:
+        session.duration_sec = int((now - session.started_at).total_seconds())
+    
+    db.commit()
+    return {"message": "세션이 종료되었어요", "duration_sec": session.duration_sec}
+
+# 커피챗 세션 조회 API
+@app.get("/api/chat-session/{booking_id}")
+def get_chat_session(booking_id: int, db: Session = Depends(get_db)):
+    session = db.query(ChatSession).filter(
+        ChatSession.booking_id == booking_id
+    ).first()
+    
+    if not session:
+        return {"status": "READY"}
+    
+    return {
+        "session_id": session.id,
+        "status": session.status,
+        "started_at": str(session.started_at) if session.started_at else None,
+        "ended_at": str(session.ended_at) if session.ended_at else None,
+        "duration_sec": session.duration_sec,
+        "stt_text": session.stt_text,
+        "ai_summary": session.ai_summary
+    }
 
 # =====================================================================
 # 💡 [신규/보완] 멘토 가용 시간 Bulk 저장 (ID 꼬임 완전 방지 가드 탑재)
