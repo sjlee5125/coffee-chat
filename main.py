@@ -145,6 +145,13 @@ class PenaltyRequest(BaseModel):
     time: str   # "09:00"
     reason: str
 
+# 리뷰 관련 요청 모델
+class ReviewCreateRequest(BaseModel):
+    booking_id: int
+    user_id: int
+    mentor_id: int
+    rating: int
+    review: str
 
 # --- [API 라우터 비즈니스 로직 구역] ---
 
@@ -703,7 +710,21 @@ def get_chat_session(booking_id: int, db: Session = Depends(get_db)):
         "stt_text": session.stt_text,
         "ai_summary": session.ai_summary
     }
-
+# 리뷰 
+@app.post("/api/review/create")
+def create_review(request: ReviewCreateRequest, db: Session = Depends(get_db)):
+    print(f" [리뷰 생성] booking_id={request.booking_id}, rating={request.rating}")
+    
+    # chat_sessions 업데이트
+    session = db.query(ChatSession).filter(
+        ChatSession.booking_id == request.booking_id
+    ).first()
+    
+    if session:
+        session.ai_summary = request.review
+        db.commit()
+    
+    return {"message": "리뷰가 저장되었어요!"}
 # =====================================================================
 # 💡 [신규/보완] 멘토 가용 시간 Bulk 저장 (ID 꼬임 완전 방지 가드 탑재)
 # =====================================================================
