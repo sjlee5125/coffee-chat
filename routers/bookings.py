@@ -188,7 +188,7 @@ def get_mentee_bookings(user_id: int, db: Session = Depends(get_db)):
     if not bookings:
         return []   
     return result 
-@router.get("/api/{user_id}")
+@router.get("/{user_id}")
 def get_bookings(user_id: int, db: Session = Depends(get_db)):
     print(f" [예약 목록 조회] User ID: {user_id}")
     
