@@ -1,10 +1,8 @@
-import asyncio
+from pydantic import BaseModel
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from models import User, Mentor, Booking, MentorAvailability, get_db
-from schemas import BookingCreateRequest
-
-# 💡 위에서 만든 알림 매니저를 가져옵니다.
+from models import User, Mentor, Booking, MentorAvailability, Notification, get_db
 from routers.notifications import manager 
 
 # 라우터 생성 (prefix를 지정해두면 아래에서 /api/booking 을 생략할 수 있습니다)
@@ -13,8 +11,19 @@ router = APIRouter(
     tags=["Bookings"]
 )
 
+# 💡 잃어버렸던 userId 필드 완벽 복구!
+class BookingCreateRequest(BaseModel):
+    mentorId: int
+    userId: int
+    date: date
+    time: str
+    questions: str
+
+# ==========================================================
+# 1. 커피챗 예약 생성 (async 적용)
+# ==========================================================
 @router.post("/create")
-def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db)):
+async def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db)):
     """멘티의 커피챗 예약 생성 API"""
     print(f" [예약 생성 요청] mentor_id={request.mentorId}, user_id={request.userId}, date={request.date}, time={request.time}")
 
@@ -56,68 +65,91 @@ def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db))
     db.refresh(booking)
     print(f" [예약 생성 성공 완결] Booking ID: {booking.id} 매핑 데이터 세팅 완료")
 
+    # 🌟 [알림 기능] DB 저장 + 즉시 전송
     try:
-        # 분리해둔 매니저를 통해 알림 전송!
-        asyncio.create_task(manager.send_personal_message(
-            {"type": "NEW_NOTIFICATION", "message": "🎉 새로운 커피챗 예약 요청이 도착했습니다!"}, 
-            mentor.user_id
-        ))
+        new_notif = Notification(
+            user_id=mentor.user_id, 
+            message=f"🎉 새로운 커피챗 예약 요청이 도착했습니다!",
+            is_read=False
+        )
+        db.add(new_notif)
+        db.commit()
+        db.refresh(new_notif)
+
+        # asyncio.create_task 대신 await로 0초 딜레이 전송!
+        notif_data = {
+            "id": new_notif.id,
+            "message": new_notif.message,
+            "is_read": False,
+            "created_at": new_notif.created_at.isoformat() if new_notif.created_at else None,
+            "type": "NEW_NOTIFICATION"
+        }
+        await manager.send_personal_message(notif_data, mentor.user_id)
+        
     except Exception as ws_err:
-        print(f" [알림 전송 실패 비치명적 에러]: {str(ws_err)}")
+        print(f"❌ [알림 전송 실패]: {str(ws_err)}")
 
     return {"message": "예약이 완료되었습니다.", "booking_id": booking.id}
-# routers/bookings.py 맨 아래에 이 함수 하나만 남겨두세요.
 
+
+# ==========================================================
+# 2. 예약 확정 (멘토가 수락할 때 멘티에게 알림!) (async 적용)
+# ==========================================================
 @router.post("/confirm/{booking_id}")
-def confirm_booking(booking_id: int, db: Session = Depends(get_db)):
-    """
-    멘토가 대시보드에서 예약을 최종 수락(CONFIRMED)하는 API
-    예약 확정 시 멘티에게 실시간 알림을 보냅니다.
-    """
+async def confirm_booking(booking_id: int, db: Session = Depends(get_db)):
+    """예약 확정 시 멘티에게 실시간 알림 전송 API"""
     print(f" [예약 최종 수락 요청] Booking ID: {booking_id}")
     
-    # 1. 예약 내역 조회
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="예약 내역을 찾을 수 없습니다.")
     
-    # 2. 상태를 CONFIRMED로 승격
     booking.status = "CONFIRMED"
     db.commit()
     print(f" [예약 확정 완료] Booking ID: {booking_id} 상태가 CONFIRMED로 변경됨")
     
-    # 3. 💡 예약 확정 알림 (멘티에게 전송)
+    # 🌟 [알림 기능] 확정 알림도 DB에 저장하고 멘티에게 전송!
     try:
-        asyncio.create_task(manager.send_personal_message(
-            {
-                "type": "BOOKING_CONFIRMED", 
-                "message": "🎉 멘토님이 커피챗 예약을 최종 확정했습니다!",
-                "booking_id": booking_id
-            }, 
-            booking.user_id # 예약자인 멘티에게 알림 발송
-        ))
+        new_notif = Notification(
+            user_id=booking.user_id, # 이번엔 예약자(멘티)에게 보냅니다!
+            message=f"🎉 멘토님이 커피챗 예약을 최종 확정했습니다!",
+            is_read=False
+        )
+        db.add(new_notif)
+        db.commit()
+        db.refresh(new_notif)
+
+        notif_data = {
+            "id": new_notif.id,
+            "message": new_notif.message,
+            "is_read": False,
+            "created_at": new_notif.created_at.isoformat() if new_notif.created_at else None,
+            "type": "BOOKING_CONFIRMED",
+            "booking_id": booking_id
+        }
+        await manager.send_personal_message(notif_data, booking.user_id)
+        
     except Exception as ws_err:
-        print(f" [알림 전송 실패]: {str(ws_err)}")
+        print(f"❌ [알림 전송 실패]: {str(ws_err)}")
     
     return {"message": "커피챗 예약이 최종 확정되었습니다."}
+
+
+# ==========================================================
+# 3. 멘토 대시보드 예약 조회
+# ==========================================================
 @router.get("/mentor/{mentor_id}")
 def get_mentor_bookings(mentor_id: int, db: Session = Depends(get_db)):
-    """
-    멘토 대시보드 예약 내역 페이지에 띄울 데이터를 조회합니다.
-    (멘토 ID를 기준으로 해당 멘토에게 들어온 모든 예약 신청을 가져옵니다.)
-    """
-    # 멘토가 User 테이블의 id를 쓰고 있는지 Mentor 테이블의 id를 쓰고 있는지에 맞춰 조회
+    """멘토 대시보드 예약 내역 조회 API"""
     mentor = db.query(Mentor).filter((Mentor.id == mentor_id) | (Mentor.user_id == mentor_id)).first()
     
     if not mentor:
         raise HTTPException(status_code=404, detail="멘토 정보를 찾을 수 없습니다.")
 
-    # 해당 멘토의 예약 내역을 모두 조회 (PENDING/PAID 등 확정 전 상태 포함)
     bookings = db.query(Booking).filter(
         (Booking.mentor_id == mentor.id) | (Booking.mentor_id == mentor.user_id)
     ).all()
 
-    # 프론트엔드에서 요구하는 필드 형태로 가공하여 리턴합니다.
     result = []
     for b in bookings:
         mentee = db.query(User).filter(User.id == b.user_id).first()
@@ -125,7 +157,7 @@ def get_mentor_bookings(mentor_id: int, db: Session = Depends(get_db)):
             "booking_id": b.id,
             "mentee_name": mentee.name if mentee else "익명 크루",
             "mentee_image": mentee.profile_image if mentee and hasattr(mentee, 'profile_image') else None,
-            "candidate_times": f"['{b.booking_time}']", # 프론트에서 파싱하기 쉽게 리스트 형태 문자열로
+            "candidate_times": f"['{b.booking_time}']", 
             "questions": b.questions,
             "status": b.status
         })
