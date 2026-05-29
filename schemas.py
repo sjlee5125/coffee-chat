@@ -37,7 +37,15 @@ class ProfileUpdateRequest(BaseModel):
     help_provide: Optional[str] = None
     help_receive: Optional[str] = None
     profile_image: Optional[str] = None
+    phone_number: Optional[str] = None
 
+    job_title: Optional[str] = None
+    career_history: Optional[str] = None
+    mentor_intro: Optional[str] = None
+    mentoring_topics: Optional[str] = None
+    mentor_keywords: Optional[str] = None
+    detailed_experience: Optional[str] = None
+    mentor_links: Optional[str] = None
 
 # ─── [멘토 관련 스키마] ───
 
