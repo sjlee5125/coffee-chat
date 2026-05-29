@@ -37,10 +37,7 @@ app.add_middleware(
     allow_methods=["*"], 
     allow_headers=["*"], 
 )
-    
-# =====================================================================
-# 🧩 라우터 블록 조립 구역 (여기서 모든 파일이 연결됩니다)
-# =====================================================================
+
 app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(users.router)
 app.include_router(mentors.router)
