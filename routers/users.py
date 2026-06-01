@@ -48,7 +48,7 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
     m_keywords = "[]"
     if mentor and hasattr(mentor, "mentor_keywords") and mentor.mentor_keywords:
         m_keywords = mentor.mentor_keywords
-
+    is_mentor = db.query(Mentor).filter(Mentor.user_id == user_id).first() is not None
     return {
         "id": user.id,
         "email": user.email,
@@ -82,6 +82,7 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
         "help_receive": getattr(user, "help_receive", "") or "",
         "profile_image": getattr(user, "profile_image", "") or "",
         "phone_number": getattr(user, "phone_number", "") or "",
+        "is_mentor": is_mentor
     }
 @router.post("/{user_id}/profile-image")
 async def upload_profile_image(
