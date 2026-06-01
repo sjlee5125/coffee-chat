@@ -194,18 +194,18 @@ async def reject_booking(booking_id: int, db: Session = Depends(get_db)):
 def get_mentor_bookings(mentor_id: int, db: Session = Depends(get_db)):
     """
     멘토 대시보드 예약 내역 페이지에 띄울 데이터를 조회합니다.
-    (멘토 ID를 기준으로 해당 멘토에게 들어온 모든 예약 신청을 가져옵니다.)
+    (수락 대기 중인 'PAID' 상태의 예약 신청만 골라서 가져옵니다.)
     """
-    # 멘토가 User 테이블의 id를 쓰고 있는지 Mentor 테이블의 id를 쓰고 있는지에 맞춰 조회
     mentor = db.query(Mentor).filter((Mentor.id == mentor_id) | (Mentor.user_id == mentor_id)).first()
     
-    # ❌ 404 에러를 던지던 로직 삭제
-    # ✅ 멘토가 아니면 에러 대신 조용히 빈 리스트([])를 반환합니다.
     if not mentor:
         return []
 
+    # 💡 [핵심 수정] Booking.status == "PAID" 조건을 추가했습니다!
+    # 이제 확정(CONFIRMED)되거나 거절(REJECTED)되어 상태가 바뀐 예약은 아예 조회되지 않습니다.
     bookings = db.query(Booking).filter(
-        (Booking.mentor_id == mentor.id) | (Booking.mentor_id == mentor.user_id)
+        ((Booking.mentor_id == mentor.id) | (Booking.mentor_id == mentor.user_id)),
+        Booking.status == "PAID"
     ).all()
 
     result = []
@@ -215,7 +215,7 @@ def get_mentor_bookings(mentor_id: int, db: Session = Depends(get_db)):
             "booking_id": b.id,
             "mentee_name": mentee.name if mentee else "익명 크루",
             "mentee_image": mentee.profile_image if mentee and hasattr(mentee, 'profile_image') else None,
-           "booking_date": str(b.booking_date) if b.booking_date else "", 
+            "booking_date": str(b.booking_date) if b.booking_date else "", 
             "booking_time": str(b.booking_time) if b.booking_time else "",
             "candidate_times": f"{b.booking_date} {b.booking_time}",
             "questions": b.questions,
