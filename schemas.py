@@ -46,6 +46,9 @@ class ProfileUpdateRequest(BaseModel):
     mentor_keywords: Optional[str] = None
     detailed_experience: Optional[str] = None
     mentor_links: Optional[str] = None
+    status: str | None = None
+    main_category: str | None = None
+    sub_category: str | None = None
 
 # ─── [멘토 관련 스키마] ───
 
