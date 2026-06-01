@@ -47,14 +47,13 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
     elif user.portfolio_url:
         m_links = json.dumps([user.portfolio_url])
 
-    # 💡 대화 키워드 안전하게 가져오기
+    # 대화 키워드 안전하게 가져오기
     m_keywords = "[]"
     if mentor and hasattr(mentor, "mentor_keywords") and mentor.mentor_keywords:
         m_keywords = mentor.mentor_keywords
         
     is_mentor = mentor is not None
 
-    # 🚀 [핵심 수정] 중복된 키(key)들을 싹 다 지우고 한 번만 깔끔하게 리턴합니다!
     return {
         "id": user.id,
         "email": user.email,
@@ -70,7 +69,12 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
         "profile_image": user.profile_image or "",
         "phone_number": user.phone_number or "", 
         
-        # 🌟 호스트 화면으로 꼽아줄 데이터들 완벽 조회
+        # 🌟 [추가됨] 프론트엔드로 직무 정보 보내주기
+        "main_category": getattr(mentor, "main_category", "") if mentor else "",
+        "sub_category": getattr(mentor, "sub_category", "") if mentor else "",
+        "status": getattr(mentor, "status", "") if mentor else "",
+        
+        # 호스트 화면으로 꼽아줄 데이터들 완벽 조회
         "job_title": mentor.job_title if mentor else "",
         "mentor_intro": m_intro,
         "career_history": mentor.career_history if mentor else "[]",
@@ -139,7 +143,7 @@ def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session
     user.help_receive = request.help_receive
     user.phone_number = request.phone_number 
     
-    # 💡 안전장치: 빈 값이 아닐 때만 프로필 이미지를 덮어씁니다.
+    # 안전장치: 빈 값이 아닐 때만 프로필 이미지를 덮어씁니다.
     if request.profile_image and request.profile_image.startswith("http"):
         user.profile_image = request.profile_image
 
@@ -148,6 +152,14 @@ def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session
     if not mentor:
         mentor = Mentor(user_id=user_id)
         db.add(mentor)
+
+    # 🌟 [추가됨] 프론트엔드가 보낸 직무 정보를 DB에 꽂아 넣기
+    if hasattr(request, "main_category"):
+        mentor.main_category = request.main_category
+    if hasattr(request, "sub_category"):
+        mentor.sub_category = request.sub_category
+    if hasattr(request, "status"):
+        mentor.status = request.status
 
     mentor.name = request.name
     mentor.job_title = request.job_title if request.job_title else "직무 미정"
@@ -162,9 +174,9 @@ def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session
         tags = [t.strip() for t in request.hashtags.split() if t.strip()]
         mentor.mentoring_topics = json.dumps(tags)
 
-    if hasattr(mentor, "mentor_keywords") and request.mentor_keywords:
+    if hasattr(mentor, "mentor_keywords") and hasattr(request, "mentor_keywords") and request.mentor_keywords:
         mentor.mentor_keywords = request.mentor_keywords
-    if hasattr(mentor, "mentor_links") and request.mentor_links:
+    if hasattr(mentor, "mentor_links") and hasattr(request, "mentor_links") and request.mentor_links:
         mentor.mentor_links = request.mentor_links
 
     db.commit()
