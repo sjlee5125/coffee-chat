@@ -2,7 +2,8 @@ from pydantic import BaseModel
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from models import User, Mentor, Booking, MentorAvailability, Notification, get_db
+# bookings.py 상단 수정
+from models import User, Mentor, Booking, MentorAvailability, Notification, get_db, ChatSession
 from routers.notifications import manager 
 from datetime import datetime, timedelta
 # 라우터 생성 (prefix를 지정해두면 아래에서 /api/booking 을 생략할 수 있습니다)
@@ -101,11 +102,11 @@ async def create_booking(request: BookingCreateRequest, db: Session = Depends(ge
 
 
 # ==========================================================
-# 2. 예약 확정 (멘토가 수락할 때 멘티에게 알림!) (async 적용)
+# 2. 예약 확정 (멘토가 수락할 때 멘티에게 알림 & 채팅 세션 생성!) 
 # ==========================================================
 @router.post("/confirm/{booking_id}")
 async def confirm_booking(booking_id: int, db: Session = Depends(get_db)):
-    """예약 확정 시 멘티에게 실시간 알림 전송 API"""
+    """예약 확정 시 멘티에게 실시간 알림 전송 및 채팅 세션 생성 API"""
     print(f" [예약 최종 수락 요청] Booking ID: {booking_id}")
     
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
@@ -113,13 +114,25 @@ async def confirm_booking(booking_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="예약 내역을 찾을 수 없습니다.")
     
     booking.status = "CONFIRMED"
-    db.commit()
-    print(f" [예약 확정 완료] Booking ID: {booking_id} 상태가 CONFIRMED로 변경됨")
     
-    # 🌟 [알림 기능] 확정 알림도 DB에 저장하고 멘티에게 전송!
+    # 🌟 [추가됨] ChatSession 자동 생성 로직
+    existing_session = db.query(ChatSession).filter(ChatSession.booking_id == booking_id).first()
+    if not existing_session:
+        new_session = ChatSession(
+            booking_id=booking.id,
+            mentor_id=booking.mentor_id,
+            user_id=booking.user_id,
+            status="READY" # 초기 상태는 READY
+        )
+        db.add(new_session)
+
+    db.commit()
+    print(f" [예약 확정 완료] Booking ID: {booking_id} 상태가 CONFIRMED로 변경 및 세션 생성됨")
+    
+    # 🌟 [알림 기능] 기존 코드 그대로 유지
     try:
         new_notif = Notification(
-            user_id=booking.user_id, # 이번엔 예약자(멘티)에게 보냅니다!
+            user_id=booking.user_id,
             message=f"🎉 멘토님이 커피챗 예약을 최종 확정했습니다!",
             is_read=False
         )
@@ -141,22 +154,66 @@ async def confirm_booking(booking_id: int, db: Session = Depends(get_db)):
         print(f"❌ [알림 전송 실패]: {str(ws_err)}")
     
     return {"message": "커피챗 예약이 최종 확정되었습니다."}
+
+# ==========================================================
+# 3. 예약 거절 (멘토가 거절할 때 멘티에게 알림!)
+# ==========================================================
+@router.post("/reject/{booking_id}")
+async def reject_booking(booking_id: int, db: Session = Depends(get_db)):
+    """예약 거절 시 멘티에게 실시간 알림 전송 API"""
+    print(f" [예약 거절 요청] Booking ID: {booking_id}")
+    
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="예약 내역을 찾을 수 없습니다.")
+    
+    # 1. 상태를 REJECTED로 변경
+    booking.status = "REJECTED"
+    db.commit()
+    print(f" [예약 거절 완료] Booking ID: {booking_id} 상태가 REJECTED로 변경됨")
+    
+    # 2. [알림 기능] 멘티에게 거절 알림 DB 저장 및 실시간 전송
+    try:
+        new_notif = Notification(
+            user_id=booking.user_id, # 예약자(멘티)에게 보냅니다!
+            message=f"😢 아쉽게도 멘토님의 일정상 커피챗 예약이 거절되었습니다.",
+            is_read=False
+        )
+        db.add(new_notif)
+        db.commit()
+        db.refresh(new_notif)
+
+        notif_data = {
+            "id": new_notif.id,
+            "message": new_notif.message,
+            "is_read": False,
+            "created_at": new_notif.created_at.isoformat() if new_notif.created_at else None,
+            "type": "BOOKING_REJECTED",
+            "booking_id": booking_id
+        }
+        await manager.send_personal_message(notif_data, booking.user_id)
+        
+    except Exception as ws_err:
+        print(f"❌ [알림 전송 실패]: {str(ws_err)}")
+    
+    return {"message": "커피챗 예약이 거절되었습니다."}
+
 @router.get("/mentor/{mentor_id}")
 def get_mentor_bookings(mentor_id: int, db: Session = Depends(get_db)):
     """
     멘토 대시보드 예약 내역 페이지에 띄울 데이터를 조회합니다.
-    (멘토 ID를 기준으로 해당 멘토에게 들어온 모든 예약 신청을 가져옵니다.)
+    (수락 대기 중인 'PAID' 상태의 예약 신청만 골라서 가져옵니다.)
     """
-    # 멘토가 User 테이블의 id를 쓰고 있는지 Mentor 테이블의 id를 쓰고 있는지에 맞춰 조회
     mentor = db.query(Mentor).filter((Mentor.id == mentor_id) | (Mentor.user_id == mentor_id)).first()
     
-    # ❌ 404 에러를 던지던 로직 삭제
-    # ✅ 멘토가 아니면 에러 대신 조용히 빈 리스트([])를 반환합니다.
     if not mentor:
         return []
 
+    # 💡 [핵심 수정] Booking.status == "PAID" 조건을 추가했습니다!
+    # 이제 확정(CONFIRMED)되거나 거절(REJECTED)되어 상태가 바뀐 예약은 아예 조회되지 않습니다.
     bookings = db.query(Booking).filter(
-        (Booking.mentor_id == mentor.id) | (Booking.mentor_id == mentor.user_id)
+        ((Booking.mentor_id == mentor.id) | (Booking.mentor_id == mentor.user_id)),
+        Booking.status == "PAID"
     ).all()
 
     result = []
@@ -166,7 +223,7 @@ def get_mentor_bookings(mentor_id: int, db: Session = Depends(get_db)):
             "booking_id": b.id,
             "mentee_name": mentee.name if mentee else "익명 크루",
             "mentee_image": mentee.profile_image if mentee and hasattr(mentee, 'profile_image') else None,
-           "booking_date": str(b.booking_date) if b.booking_date else "", 
+            "booking_date": str(b.booking_date) if b.booking_date else "", 
             "booking_time": str(b.booking_time) if b.booking_time else "",
             "candidate_times": f"{b.booking_date} {b.booking_time}",
             "questions": b.questions,
@@ -200,14 +257,21 @@ def get_mentee_bookings(user_id: int, db: Session = Depends(get_db)):
 def get_bookings(user_id: int, db: Session = Depends(get_db)):
     print(f" [예약 목록 조회] User ID: {user_id}")
     
+    # 💡 멘티로 신청한 내역 + 멘토로서 신청받은 내역을 모두 가져오기 위해 mentor_id 조회
+    mentor = db.query(Mentor).filter((Mentor.user_id == user_id) | (Mentor.id == user_id)).first()
+    mentor_id = mentor.id if mentor else -1
+
+    # 💡 CONFIRMED(확정) 상태인 예약만 CoffeeChats.jsx 대시보드에 띄웁니다!
     bookings = db.query(Booking).filter(
-        Booking.user_id == user_id
+        (Booking.status == "CONFIRMED"),
+        ((Booking.user_id == user_id) | (Booking.mentor_id == mentor_id) | (Booking.mentor_id == user_id))
     ).order_by(Booking.booking_date.desc()).all()
     
     now = datetime.now()
     result = []
     
     for b in bookings:
+        # 시간 파싱 (기존 로직 유지)
         try:
             booking_datetime = datetime.strptime(
                 f"{b.booking_date} {b.booking_time}", 
@@ -219,24 +283,35 @@ def get_bookings(user_id: int, db: Session = Depends(get_db)):
                 "%Y-%m-%d %I:%M %p"
             )
         
-        # 시간 기준으로 상태 자동 분류
-        if now < booking_datetime - timedelta(minutes=5):
-            tab_status = "upcoming"
-        elif booking_datetime - timedelta(minutes=5) <= now <= booking_datetime + timedelta(minutes=30):
+        # 🌟 [핵심 변경] ChatSession 상태와 시간 로직을 결합하여 tab_status 결정
+        chat_session = db.query(ChatSession).filter(ChatSession.booking_id == b.id).first()
+        
+        tab_status = "upcoming" # 기본값
+        if chat_session and chat_session.status == "COMPLETED":
+            tab_status = "completed"
+        elif chat_session and chat_session.status == "ONGOING":
             tab_status = "ongoing"
         else:
-            tab_status = "completed"
-            
-        try:
-            mentor = db.query(Mentor).filter(Mentor.id == b.mentor_id).first()
-            real_mentor_name = mentor.name if mentor else f"멘토 #{b.mentor_id}"
-        except:
-            real_mentor_name = f"멘토 #{b.mentor_id}"
+            # 아직 READY 상태라면, 약속 시간을 기준으로 자동 분류
+            if now < booking_datetime - timedelta(minutes=5):
+                tab_status = "upcoming"
+            elif booking_datetime - timedelta(minutes=5) <= now <= booking_datetime + timedelta(minutes=30):
+                tab_status = "ongoing"
+            else:
+                tab_status = "completed"
+                
+        # 💡 상대방 이름 파악 (내가 멘티면 상대는 멘토, 내가 멘토면 상대는 멘티)
+        if b.user_id == user_id:
+            target_mentor = db.query(Mentor).filter(Mentor.id == b.mentor_id).first()
+            partner_name = target_mentor.name if target_mentor else f"멘토 #{b.mentor_id}"
+        else:
+            target_mentee = db.query(User).filter(User.id == b.user_id).first()
+            partner_name = target_mentee.name if target_mentee else "크루(예약자)"
         
         result.append({
             "id": b.id,
             "mentor_id": b.mentor_id,
-            "mentor_name": real_mentor_name,
+            "mentor_name": partner_name,  # CoffeeChats.jsx는 mentor_name을 아바타 이름으로 씁니다!
             "user_id": b.user_id,
             "booking_date": str(b.booking_date),
             "booking_time": b.booking_time,
