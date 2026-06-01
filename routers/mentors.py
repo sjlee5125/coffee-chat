@@ -53,9 +53,18 @@ def get_mentors_list(db: Session = Depends(get_db)):
 
 @router.get("/api/mentors/{mentor_id}")
 def get_mentor_detail(mentor_id: int, db: Session = Depends(get_db)):
+    # 1. 멘토 정보 가져오기
     mentor = db.query(Mentor).filter(Mentor.id == mentor_id).first()
     if not mentor:
         raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
+
+    # 💡 [핵심 수정] 사진은 Mentor가 아니라 User 테이블에 있습니다!
+    # 멘토의 user_id를 이용해 User 테이블에서 사진을 꺼내옵니다.
+    user = db.query(User).filter(User.id == mentor.user_id).first()
+    
+    # 유저 정보가 있으면 프로필 사진을 가져오고, 없으면 None 처리
+    actual_profile_image = user.profile_image if user else None
+
     return {
         "id": mentor.id,
         "name": mentor.name or "멘토",
@@ -64,13 +73,14 @@ def get_mentor_detail(mentor_id: int, db: Session = Depends(get_db)):
         "career_history": mentor.career_history or [],
         "mentoring_topics": mentor.mentoring_topics or [],
         "detailed_experience": mentor.detailed_experience or [],
-        "profile_image": mentor.profile_image if (
-            mentor.profile_image and 
-            mentor.profile_image != "null" and 
-            "unsplash" not in mentor.profile_image
-        ) else "https://coffeechat.blob.core.windows.net/profiles/KakaoTalk_20260601_105227589.png"
+        
+        # 💡 [핵심 수정] mentor.profile_image 대신 actual_profile_image를 검사합니다!
+        "profile_image": actual_profile_image if (
+            actual_profile_image and 
+            actual_profile_image != "null" and 
+            "unsplash" not in actual_profile_image
+        ) else "https://upload.wikimedia.org/wikipedia/commons/7/7c/Profile_avatar_placeholder_large.png"
     }
-
 @router.get("/api/mentor/details/{user_id}")
 def get_mentor_details(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
