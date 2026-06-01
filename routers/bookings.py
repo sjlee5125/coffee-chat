@@ -67,27 +67,37 @@ async def create_booking(request: BookingCreateRequest, db: Session = Depends(ge
 
     # 🌟 [알림 기능] DB 저장 + 즉시 전송
     try:
+        # 💡 1. 멘토의 진짜 User ID를 확실하게 찾습니다. (DB 에러 방지용 안전장치)
+        target_mentor_user_id = mentor.user_id if mentor.user_id else request.mentorId
+        
+        # 💡 2. 누가 신청했는지 이름을 넣어서 퀄리티를 높입니다.
         new_notif = Notification(
-            user_id=mentor.user_id, 
-            message=f"🎉 새로운 커피챗 예약 요청이 도착했습니다!",
+            user_id=target_mentor_user_id, 
+            message=f"🎉 {user.name}님으로부터 새로운 커피챗 예약 요청이 도착했습니다!",
             is_read=False
         )
         db.add(new_notif)
         db.commit()
         db.refresh(new_notif)
 
-        # asyncio.create_task 대신 await로 0초 딜레이 전송!
+        # 💡 3. 웹소켓 전송용 데이터 포장 (booking_id 추가)
         notif_data = {
             "id": new_notif.id,
             "message": new_notif.message,
             "is_read": False,
             "created_at": new_notif.created_at.isoformat() if new_notif.created_at else None,
-            "type": "NEW_NOTIFICATION"
+            "type": "NEW_BOOKING_REQUEST",
+            "booking_id": booking.id
         }
-        await manager.send_personal_message(notif_data, mentor.user_id)
+        
+        # 💡 4. 웹소켓으로 멘토에게 실시간 0.1초 발송!
+        await manager.send_personal_message(notif_data, target_mentor_user_id)
+        print(f"✅ [알림 발송 성공] 멘토(ID:{target_mentor_user_id})에게 예약(ID:{booking.id}) 알림 전송 완료")
         
     except Exception as ws_err:
-        print(f"❌ [알림 전송 실패]: {str(ws_err)}")
+        print(f"❌ [알림 전송 치명적 에러]: {str(ws_err)}")
+        db.rollback() # 에러가 나도 DB가 멈추지 않도록 롤백 처리
+    # ==========================================================
 
     return {"message": "예약이 완료되었습니다.", "booking_id": booking.id}
 
