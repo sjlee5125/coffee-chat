@@ -25,9 +25,12 @@ class BookingCreateRequest(BaseModel):
 @router.post("/create")
 async def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db)):
     """멘티의 커피챗 예약 생성 API"""
-    print(f" [예약 생성 요청] mentor_id={request.mentorId}, user_id={request.userId}, date={request.date}, time={request.time}")
+    print(f" [예약 생성 요청] mentor_id={request.mentorId}, user_id={request.userId}")
 
-    mentor = db.query(Mentor).filter((Mentor.id == request.mentorId) | (Mentor.user_id == request.mentorId)).first()
+    # 🚨 [핵심 수리] 엉뚱한 사람을 잡게 만들던 OR(|) 조건을 삭제했습니다!
+    # 프론트가 보내준 멘토 고유번호(PK)만 정확하게 조준합니다.
+    mentor = db.query(Mentor).filter(Mentor.id == request.mentorId).first()
+    
     if not mentor: 
         raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
 
@@ -35,8 +38,9 @@ async def create_booking(request: BookingCreateRequest, db: Session = Depends(ge
     if not user:
         raise HTTPException(status_code=404, detail="존재하지 않는 예약자(유저) 회원입니다.")
 
+    # 🚨 [핵심 수리] 예약 중복 검사에서도 불필요한 OR 조건 제거
     existing = db.query(Booking).filter(
-        ((Booking.mentor_id == mentor.id) | (Booking.mentor_id == mentor.user_id)),
+        Booking.mentor_id == mentor.id,
         Booking.booking_date == request.date,
         Booking.booking_time == request.time,
         Booking.status == "PAID"
@@ -55,8 +59,9 @@ async def create_booking(request: BookingCreateRequest, db: Session = Depends(ge
     )
     db.add(booking)
 
+    # 🚨 [핵심 수리] 가용 시간 삭제에서도 불필요한 OR 조건 제거
     db.query(MentorAvailability).filter(
-        ((MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id)),
+        MentorAvailability.mentor_id == mentor.id,
         MentorAvailability.date == request.date,
         MentorAvailability.time == request.time,
     ).delete()
@@ -65,14 +70,14 @@ async def create_booking(request: BookingCreateRequest, db: Session = Depends(ge
     db.refresh(booking)
     print(f" [예약 생성 성공 완결] Booking ID: {booking.id} 매핑 데이터 세팅 완료")
 
-    # 🌟 [알림 기능] DB 저장 + 즉시 전송
+    # ==========================================================
+    # 🌟 [알림 기능] 멘토의 진짜 user_id를 찾아 안전하게 100% 발송!
+    # ==========================================================
     try:
-        # 💡 1. 멘토의 진짜 User ID를 확실하게 찾습니다. (DB 에러 방지용 안전장치)
-        target_mentor_user_id = mentor.user_id if mentor.user_id else request.mentorId
+        target_user_id = mentor.user_id
         
-        # 💡 2. 누가 신청했는지 이름을 넣어서 퀄리티를 높입니다.
         new_notif = Notification(
-            user_id=target_mentor_user_id, 
+            user_id=target_user_id, 
             message=f"🎉 {user.name}님으로부터 새로운 커피챗 예약 요청이 도착했습니다!",
             is_read=False
         )
@@ -80,24 +85,17 @@ async def create_booking(request: BookingCreateRequest, db: Session = Depends(ge
         db.commit()
         db.refresh(new_notif)
 
-        # 💡 3. 웹소켓 전송용 데이터 포장 (booking_id 추가)
         notif_data = {
             "id": new_notif.id,
             "message": new_notif.message,
             "is_read": False,
             "created_at": new_notif.created_at.isoformat() if new_notif.created_at else None,
-            "type": "NEW_BOOKING_REQUEST",
-            "booking_id": booking.id
+            "type": "NEW_BOOKING_REQUEST"
         }
-        
-        # 💡 4. 웹소켓으로 멘토에게 실시간 0.1초 발송!
-        await manager.send_personal_message(notif_data, target_mentor_user_id)
-        print(f"✅ [알림 발송 성공] 멘토(ID:{target_mentor_user_id})에게 예약(ID:{booking.id}) 알림 전송 완료")
+        await manager.send_personal_message(notif_data, target_user_id)
         
     except Exception as ws_err:
-        print(f"❌ [알림 전송 치명적 에러]: {str(ws_err)}")
-        db.rollback() # 에러가 나도 DB가 멈추지 않도록 롤백 처리
-    # ==========================================================
+        print(f"❌ [알림 전송 실패]: {str(ws_err)}")
 
     return {"message": "예약이 완료되었습니다.", "booking_id": booking.id}
 
