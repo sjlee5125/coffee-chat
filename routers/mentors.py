@@ -64,12 +64,11 @@ def get_mentor_detail(mentor_id: int, db: Session = Depends(get_db)):
         "career_history": mentor.career_history or [],
         "mentoring_topics": mentor.mentoring_topics or [],
         "detailed_experience": mentor.detailed_experience or [],
-        # 💡 [핵심 교정] DB에 진짜 사진이 있고, 그게 가짜 아주머니 주소(unsplash)가 아닐 때만 진짜 사진을 보냅니다!
         "profile_image": mentor.profile_image if (
             mentor.profile_image and 
             mentor.profile_image != "null" and 
             "unsplash" not in mentor.profile_image
-        ) else "https://upload.wikimedia.org/wikipedia/commons/7/7c/Profile_avatar_placeholder_large.png"
+        ) else "https://coffeechat.blob.core.windows.net/profiles/KakaoTalk_20260601_105227589.png"
     }
 
 @router.get("/api/mentor/details/{user_id}")
