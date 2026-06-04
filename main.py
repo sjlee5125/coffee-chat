@@ -17,7 +17,7 @@ import auth
 from models import User, Mentor, Booking, MentorAvailability, ChatSession, get_db, create_tables
 
 # 💡 새로 분리한 기능별 라우터들을 가져옵니다.
-from routers import users, mentors, bookings, ai, notifications, chat, webrtc, stt, llm_chat
+from routers import users, mentors, bookings, ai, notifications, chat, webrtc, stt, lim_chat
 # 서버 실행 시 시스템의 .env 환경변수를 로드 및 DB 초기화
 load_dotenv()
 #create_tables()
