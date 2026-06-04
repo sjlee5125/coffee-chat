@@ -256,10 +256,35 @@ def get_mentee_bookings(user_id: int, db: Session = Depends(get_db)):
 
 @router.get("/detail/{booking_id}")  # <-- /api/booking/detail/78
 def get_booking(booking_id: int, db: Session = Depends(get_db)):
+    # 1. 예약 정보 조회
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="예약 정보를 찾을 수 없습니다.")
-    return booking
+    
+    # 2. 멘토 정보 및 멘토의 진짜 회원 ID(user_id) 조회
+    mentor = db.query(Mentor).filter(Mentor.id == booking.mentor_id).first()
+    
+    # 3. 멘티(일반 유저) 정보 조회 (이름 추출용)
+    mentee_user = db.query(User).filter(User.id == booking.user_id).first()
+    
+    # 4. 프론트엔드가 판별하기 좋게 커스텀 딕셔너리로 조립해서 반환
+    return {
+        "id": booking.id,
+        "booking_date": str(booking.booking_date),
+        "booking_time": booking.booking_time,
+        "questions": booking.questions,
+        "status": booking.status,
+        "created_at": booking.created_at.isoformat() if booking.created_at else None,
+        
+        # 🚨 ID 삼형제 정렬 완료!
+        "mentor_id": booking.mentor_id,          # Mentors 테이블 고유번호 (7)
+        "mentor_user_id": mentor.user_id if mentor else None,  # Users 테이블 고유번호 (17) 👈 프론트 비교용!
+        "user_id": booking.user_id,              # Mentees(Users) 테이블 고유번호 (12)
+        
+        # 🌟 프론트엔드 opponentName에서 깨지지 않고 이름을 보여주기 위한 데이터 추가
+        "mentor_name": mentor.name if mentor else "멘토",
+        "user_name": mentee_user.name if mentee_user else "멘티"
+    }
 @router.get("/{user_id}")
 def get_bookings(user_id: int, db: Session = Depends(get_db)):
     print(f" [예약 목록 조회] User ID: {user_id}")

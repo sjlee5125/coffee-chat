@@ -115,7 +115,10 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
         print(f" [ 카카오 콜백 에러]: {str(e)}")
         return RedirectResponse(url="http://localhost:5173/login?error=true", status_code=status.HTTP_302_FOUND)
 
-
+from routers import webrtc, stt, llm_chat
+app.include_router(webrtc.router)
+app.include_router(stt.router)
+app.include_router(llm_chat.router)
 
 if __name__ == "__main__":
     import uvicorn
