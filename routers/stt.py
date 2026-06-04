@@ -156,19 +156,19 @@ async def stt_endpoint(
         })
 
     try:
-        while True:
-            # 바이너리(오디오) 또는 텍스트(제어 명령) 수신
+           while True:
             msg = await websocket.receive()
-
             if "bytes" in msg and push_stream:
-                # PCM 청크를 Azure SDK에 밀어넣기
-                push_stream.write(msg["bytes"])
+                # 💡 데이터가 서버로 잘 들어오고 있는지 확인
+                if len(msg["bytes"]) > 0:
+                    logger.info(f"🎤 [STT] 오디오 청크 수신: {len(msg['bytes'])} bytes") 
+                    push_stream.write(msg["bytes"])
 
-            elif "text" in msg:
-                try:
-                    data = json.loads(msg["text"])
-                except json.JSONDecodeError:
-                    continue
+                elif "text" in msg:
+                    try:
+                        data = json.loads(msg["text"])
+                    except json.JSONDecodeError:
+                        continue
 
                 if data.get("type") == "end_session":
                     # ── 세션 종료: STT 결과 DB 저장 ───────────
