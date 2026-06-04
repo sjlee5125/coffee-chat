@@ -12,42 +12,42 @@ from .matching import calc_match_score
 @router.get("/api/mentors/recommended")
 async def get_recommended_mentors(user_id: int, db: Session = Depends(get_db)):
     try:
-        user = db.query(User).filter(User.id == user_id).first()
-        # User와 Mentor를 JOIN하여 멘토 테이블에 정보가 있는 유저만 가져옴
+        # 1. 현재 사용자 조회
+        current_user = db.query(User).filter(User.id == user_id).first()
+        
+        # 2. 멘토 정보를 가진 유저만 조회 (Mentor 테이블에 존재하는 user_id들)
         mentors = db.query(User).join(Mentor, User.id == Mentor.user_id).filter(User.id != user_id).all()
 
         scored_mentors = []
-        for mentor_user in mentors:
-            # 💡 mentor_user.mentor_profile (아까 추가한 relationship)을 사용
-            mentor_info = mentor_user.mentor_profile 
+        for user in mentors:
+            # JOIN으로 가져온 user와 연결된 Mentor 객체를 별도로 조회
+            m_info = db.query(Mentor).filter(Mentor.user_id == user.id).first()
             
-            try:
-                score, reasons = calc_match_score(user, mentor_user) if user else (0, [])
-                
-                scored_mentors.append({
-                    "id": mentor_user.id,
-                    "name": mentor_user.name or "호스트",
-                    "bio": mentor_user.bio or "",
-                    # 💡 여기가 핵심: user가 아니라 mentor_info(Mentor 모델)에서 가져와야 함
-                    "mentor_intro": mentor_info.mentor_intro if mentor_info else "",
-                    "profile_image": mentor_user.profile_image or "",
-                    "job_title": mentor_info.job_title if mentor_info else "직무 미정",
-                    "main_category": mentor_info.main_category if mentor_info else "",
-                    "sub_category": mentor_info.sub_category if mentor_info else "",
-                    "status": mentor_info.status if mentor_info else "현직자",
-                    "hashtags": mentor_user.hashtags or "",
-                    "mentor_keywords": mentor_info.mentoring_topics if mentor_info else "[]",
-                    "match_score": score,
-                    "match_reasons": reasons[:3],
-                })
-            except Exception as e:
-                print(f"❌ 멘토 {mentor_user.id} 데이터 추출 중 에러: {e}")
-                continue
+            # score 계산
+            score, reasons = calc_match_score(current_user, user) if current_user else (0, [])
+            
+            # 💡 안전하게 m_info(Mentor 모델)와 user(User 모델)에서 데이터 분리 추출
+            scored_mentors.append({
+                "id": user.id,
+                "name": user.name or "호스트",
+                "bio": user.bio or "",
+                "mentor_intro": m_info.mentor_intro if m_info else "",
+                "profile_image": user.profile_image or "",
+                "job_title": m_info.job_title if m_info else "직무 미정",
+                "main_category": m_info.main_category if m_info else "",
+                "sub_category": m_info.sub_category if m_info else "",
+                "status": m_info.status if m_info else "현직자",
+                "hashtags": user.hashtags or "",
+                # 문자열로 저장된 JSON을 파싱하거나 그대로 전달
+                "mentor_keywords": m_info.mentoring_topics if m_info else "[]",
+                "match_score": score,
+                "match_reasons": reasons[:3],
+            })
 
         scored_mentors.sort(key=lambda x: x["match_score"], reverse=True)
         return scored_mentors
     except Exception as e:
-        print(f"🚨 get_recommended_mentors 전체 에러: {e}")
+        print(f"🚨 get_recommended_mentors 에러: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 @router.get("/api/mentors")
 def get_mentors(db: Session = Depends(get_db)):
