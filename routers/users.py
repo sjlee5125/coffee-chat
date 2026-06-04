@@ -142,7 +142,7 @@ def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session
     user.help_provide = request.help_provide
     user.help_receive = request.help_receive
     user.phone_number = request.phone_number 
-    
+    user.portfolio_file_path = request.portfolio_file_path
     # 안전장치: 빈 값이 아닐 때만 프로필 이미지를 덮어씁니다.
     if request.profile_image and request.profile_image.startswith("http"):
         user.profile_image = request.profile_image
