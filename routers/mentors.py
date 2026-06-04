@@ -25,7 +25,7 @@ async def get_recommended_mentors(user_id: int, db: Session = Depends(get_db)):
             m_info = db.query(Mentor).filter(Mentor.user_id == user.id).first()
             
             # score 계산
-            score, reasons = calc_match_score(current_user, user) if current_user else (0, [])
+            score, reasons = calc_match_score(current_user, m_info) if current_user and m_info else (0, [])
             
             # 2. 모든 속성을 m_info(Mentor)와 user(User)에서 적절히 분리!
             scored_mentors.append({
