@@ -153,7 +153,7 @@ def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session
         mentor = Mentor(user_id=user_id)
         db.add(mentor)
 
-    # 🌟 [추가됨] 프론트엔드가 보낸 직무 정보를 DB에 꽂아 넣기
+    # 프론트엔드가 보낸 직무 정보를 DB에 꽂아 넣기
     if hasattr(request, "main_category"):
         mentor.main_category = request.main_category
     if hasattr(request, "sub_category"):
@@ -174,10 +174,16 @@ def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session
         tags = [t.strip() for t in request.hashtags.split() if t.strip()]
         mentor.mentoring_topics = json.dumps(tags)
 
-    if hasattr(mentor, "mentor_keywords") and hasattr(request, "mentor_keywords") and request.mentor_keywords:
+    # 🚀 [핵심 수정] 여기서 mentor_keywords와 mentor_links를 꺼내서 DB 엔티티에 직접 할당해야 합니다!
+    if hasattr(request, "mentor_keywords") and request.mentor_keywords:
         mentor.mentor_keywords = request.mentor_keywords
-    if hasattr(mentor, "mentor_links") and hasattr(request, "mentor_links") and request.mentor_links:
+    else:
+        mentor.mentor_keywords = "[]" # 비어있다면 빈 배열 저장
+
+    if hasattr(request, "mentor_links") and request.mentor_links:
         mentor.mentor_links = request.mentor_links
+    else:
+        mentor.mentor_links = "[]"
 
     db.commit()
     return {"message": "프로필 정보가 성공적으로 바인딩되었습니다."}

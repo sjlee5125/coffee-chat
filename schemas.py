@@ -33,24 +33,26 @@ class ProfileUpdateRequest(BaseModel):
     portfolio_url: Optional[str] = None
     profile_image: Optional[str] = None
     phone_number: Optional[str] = None
-    main_category: Optional[str] = None
-    sub_category: Optional[str] = None
-    status: Optional[str] = None
     
-    # 일반 프로필 태그 데이터 (문자열로 들어옴)
+    # 일반 프로필 4인방
     hashtags: Optional[str] = None
     experience: Optional[str] = None
     help_provide: Optional[str] = None
     help_receive: Optional[str] = None
     
-    # 멘토 프로필 데이터 (JSON.stringify된 문자열로 들어옴)
+    # 직무 및 상태
+    main_category: Optional[str] = None
+    sub_category: Optional[str] = None
+    status: Optional[str] = None
+
+    # 호스트(멘토) 프로필 데이터들
     job_title: Optional[str] = None
     career_history: Optional[str] = None
     mentor_intro: Optional[str] = None
     mentoring_topics: Optional[str] = None
     detailed_experience: Optional[str] = None
     
-    # 🚀 방금 프론트엔드에서 새로 추가했던 핵심 2가지!
+    # 🚀 방금 추가된 대화 키워드와 링크까지 완벽 허용!
     mentor_keywords: Optional[str] = None
     mentor_links: Optional[str] = None
 # ─── [멘토 관련 스키마] ───
