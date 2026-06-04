@@ -12,36 +12,39 @@ from .matching import calc_match_score
 @router.get("/api/mentors/recommended")
 async def get_recommended_mentors(user_id: int, db: Session = Depends(get_db)):
     try:
-        # 1. 현재 사용자 조회
         current_user = db.query(User).filter(User.id == user_id).first()
-        
-        # 2. 멘토 정보를 가진 유저만 조회 (Mentor 테이블에 존재하는 user_id들)
         mentors = db.query(User).join(Mentor, User.id == Mentor.user_id).filter(User.id != user_id).all()
 
         scored_mentors = []
-        # 여기서 user는 '멘토링을 하는 유저(User 모델)'입니다.
         for user in mentors:
-            # 1. 멘토 정보 객체를 별도로 가져옵니다.
             m_info = db.query(Mentor).filter(Mentor.user_id == user.id).first()
+            if not m_info:
+                continue
+
+            # 💡 [핵심 버그 수정] matching.py가 옛날 User 구조를 참조해서 에러가 나는 것을 방지!
+            # 에러가 안 나도록 임시로 User 객체에 Mentor의 속성을 덮어씌워 줍니다.
+            user.main_category = m_info.main_category
+            user.sub_category = m_info.sub_category
+            user.job_title = m_info.job_title
             
-            # score 계산
-            score, reasons = calc_match_score(current_user, m_info) if current_user and m_info else (0, [])
+            score, reasons = calc_match_score(current_user, user) if current_user else (0, [])
             
-            # 2. 모든 속성을 m_info(Mentor)와 user(User)에서 적절히 분리!
             scored_mentors.append({
-                "id": user.id,
+                # 🚀 프론트엔드 라우팅을 위한 완벽한 ID 구조 통일
+                "id": m_info.id,             # 멘토 PK (URL 파라미터용)
+                "mentor_id": m_info.id,      # 멘토 PK
+                "user_id": user.id,          # 유저 PK
+                
                 "name": user.name or "호스트",
                 "bio": user.bio or "",
                 "profile_image": user.profile_image or "",
                 "hashtags": user.hashtags or "",
-                
-                # Mentor 테이블에만 있는 정보는 m_info에서 가져옴!
-                "mentor_intro": m_info.mentor_intro if m_info else "",
-                "job_title": m_info.job_title if m_info else "직무 미정",
-                "main_category": m_info.main_category if m_info else "",
-                "sub_category": m_info.sub_category if m_info else "",
-                "status": m_info.status if m_info else "현직자",
-                "mentor_keywords": m_info.mentoring_topics if m_info else "[]",
+                "mentor_intro": m_info.mentor_intro or "",
+                "job_title": m_info.job_title or "직무 미정",
+                "main_category": m_info.main_category or "",
+                "sub_category": m_info.sub_category or "",
+                "status": m_info.status or "현직자",
+                "mentor_keywords": m_info.mentoring_topics or "[]",
                 
                 "match_score": score,
                 "match_reasons": reasons[:3],
@@ -61,29 +64,43 @@ def get_mentors(db: Session = Depends(get_db)):
         user_info = db.query(User).filter(User.id == m.user_id).first()
         profile_url = user_info.profile_image if user_info and user_info.profile_image else ""
 
+        # 💡 User 테이블의 help_provide 데이터를 가져와 리스트 형태로 파싱
+        tech_stack = []
+        if user_info and getattr(user_info, "help_provide", None):
+            # 쉼표 기준으로 나누고 불필요한 공백 제거
+            tech_stack = [tech.strip() for tech in user_info.help_provide.split(",") if tech.strip()]
+
         mentors_data.append({
-            "id": m.id,
+            # 🚀 ID 구조 통일
+            "id": m.id,             
+            "mentor_id": m.id,      
+            "user_id": m.user_id,   
+            
             "name": m.name or "호스트",
             "status": m.status or "현직자",
             "main_category": m.main_category or "",
             "sub_category": m.sub_category or "",
             "price": m.price or "10,000 원",
             "job_title": m.job_title or "커리어 가이드",
-            "techStack": ["백엔드", "인프라"],
+            "techStack": tech_stack, # 🚀 User 테이블의 help_provide 데이터 반영
             "avatar": profile_url,
             "profile_image": profile_url,
             "bio": m.mentor_intro or "반가워요!",
             "views": m.views or 0,
         })
     return mentors_data
-
 @router.get("/api/mentors/list")
 def get_mentors_list(db: Session = Depends(get_db)):
     results = db.query(Mentor, User).join(User, Mentor.user_id == User.id).all()
+    
     mentors_data = []
     for mentor, user in results:
         mentors_data.append({
-            "id": mentor.user_id,
+            # 🚀 ID 구조 통일 (기존 mentor.user_id에서 mentor.id로 변경)
+            "id": mentor.id,            
+            "mentor_id": mentor.id,     
+            "user_id": mentor.user_id,  
+            
             "name": mentor.name,
             "job_title": mentor.job_title or "직무 미상",
             "hashtags": getattr(user, "hashtags", "") or "",
