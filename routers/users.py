@@ -171,7 +171,7 @@ def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session
     if request.mentoring_topics and request.mentoring_topics != "[]":
         mentor.mentoring_topics = request.mentoring_topics
     elif request.hashtags:
-        tags = [t.strip() for t in request.hashtags.split() if t.strip()]
+        tags = [t.strip() for t in request.hashtags.split() if t.strip()]   
         mentor.mentoring_topics = json.dumps(tags)
 
     # 🚀 [핵심 수정] 여기서 mentor_keywords와 mentor_links를 꺼내서 DB 엔티티에 직접 할당해야 합니다!
