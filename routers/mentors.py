@@ -18,33 +18,31 @@ async def get_recommended_mentors(user_id: int, db: Session = Depends(get_db)):
         scored_mentors = []
         for user in mentors:
             m_info = db.query(Mentor).filter(Mentor.user_id == user.id).first()
-            if not m_info:
-                continue
-
-            # 💡 [핵심 버그 수정] matching.py가 옛날 User 구조를 참조해서 에러가 나는 것을 방지!
-            # 에러가 안 나도록 임시로 User 객체에 Mentor의 속성을 덮어씌워 줍니다.
-            user.main_category = m_info.main_category
-            user.sub_category = m_info.sub_category
-            user.job_title = m_info.job_title
-            
             score, reasons = calc_match_score(current_user, user) if current_user else (0, [])
             
+            # 💡 1. User 테이블에서 help_provide 데이터를 리스트로 파싱합니다.
+            tech_stack = []
+            if getattr(user, "help_provide", None):
+                tech_stack = [tech.strip() for tech in user.help_provide.split(",") if tech.strip()]
+
             scored_mentors.append({
-                # 🚀 프론트엔드 라우팅을 위한 완벽한 ID 구조 통일
-                "id": m_info.id,             # 멘토 PK (URL 파라미터용)
-                "mentor_id": m_info.id,      # 멘토 PK
-                "user_id": user.id,          # 유저 PK
-                
+                "id": m_info.id if m_info else user.id,
+                "mentor_id": m_info.id if m_info else user.id,
+                "user_id": user.id,
                 "name": user.name or "호스트",
                 "bio": user.bio or "",
                 "profile_image": user.profile_image or "",
                 "hashtags": user.hashtags or "",
-                "mentor_intro": m_info.mentor_intro or "",
-                "job_title": m_info.job_title or "직무 미정",
-                "main_category": m_info.main_category or "",
-                "sub_category": m_info.sub_category or "",
-                "status": m_info.status or "현직자",
-                "mentor_keywords": m_info.mentoring_topics or "[]",
+                
+                # 🚀 2. 프론트엔드로 techStack 데이터를 쏴줍니다!
+                "techStack": tech_stack, 
+                
+                "mentor_intro": m_info.mentor_intro if m_info else "",
+                "job_title": m_info.job_title if m_info else "직무 미정",
+                "main_category": m_info.main_category if m_info else "",
+                "sub_category": m_info.sub_category if m_info else "",
+                "status": m_info.status if m_info else "현직자",
+                "mentor_keywords": m_info.mentoring_topics if m_info else "[]",
                 
                 "match_score": score,
                 "match_reasons": reasons[:3],
