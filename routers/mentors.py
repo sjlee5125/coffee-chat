@@ -6,6 +6,43 @@ from models import User, Mentor, Booking, MentorAvailability, get_db
 from schemas import MentorRegisterRequest, AvailabilityBulkRequest, PenaltyRequest
 from sqlalchemy import desc
 router = APIRouter(tags=["Mentors"])
+from .matching import calc_match_score
+@router.get("/api/mentors/recommended")
+async def get_recommended_mentors(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+
+    if not user:
+        return db.query(User).filter(User.is_mentor == True).all()
+
+    mentors = db.query(User).filter(
+        User.is_mentor == True,
+        User.id != user_id
+    ).all()
+
+    scored_mentors = []
+    for mentor in mentors:
+        score, reasons = calc_match_score(user, mentor)  # ← 그대로 호출
+        scored_mentors.append({
+            "id": mentor.id,
+            "name": mentor.name,
+            "bio": mentor.bio,
+            "mentor_intro": mentor.mentor_intro,
+            "profile_image": mentor.profile_image,
+            "job_title": mentor.job_title,
+            "main_category": mentor.main_category,
+            "sub_category": mentor.sub_category,
+            "status": mentor.status,
+            "hashtags": mentor.hashtags,
+            "mentor_keywords": mentor.mentor_keywords,
+            "mentoring_topics": mentor.mentoring_topics,
+            "career_history": mentor.career_history,
+            "detailed_experience": mentor.detailed_experience,
+            "match_score": score,
+            "match_reasons": reasons[:3],
+        })
+
+    scored_mentors.sort(key=lambda x: x["match_score"], reverse=True)
+    return scored_mentors
 
 @router.get("/api/mentors")
 def get_mentors(db: Session = Depends(get_db)):
