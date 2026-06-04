@@ -4,19 +4,16 @@ from sqlalchemy.orm import Session
 from typing import Dict
 from models import User, Mentor, Booking, MentorAvailability, get_db
 from schemas import MentorRegisterRequest, AvailabilityBulkRequest, PenaltyRequest
-
+from sqlalchemy import desc
 router = APIRouter(tags=["Mentors"])
 
 @router.get("/api/mentors")
 def get_mentors(db: Session = Depends(get_db)):
-    results = db.query(Mentor).all()
+    results = db.query(Mentor).order_by(desc(Mentor.views)).all()
     
     mentors_data = []
     for m in results:
-        # 💡 1. Mentor 테이블에 있는 user_id를 이용해 User 테이블을 직접 검색합니다.
         user_info = db.query(User).filter(User.id == m.user_id).first()
-        
-        # 💡 2. 유저 정보가 있고 사진도 있으면 URL을 가져오고, 아니면 빈칸("") 처리
         profile_url = user_info.profile_image if user_info and user_info.profile_image else ""
 
         mentors_data.append({
@@ -28,12 +25,10 @@ def get_mentors(db: Session = Depends(get_db)):
             "price": m.price or "10,000 원",
             "job_title": m.job_title or "커리어 가이드",
             "techStack": ["백엔드", "인프라"],
-            
-            # 👇 기존의 avatar와 새로운 profile_image 모두에 찾아온 URL을 넣어줍니다. (프론트 에러 방지)
             "avatar": profile_url,
             "profile_image": profile_url,
-            
-            "bio": m.mentor_intro or "반가워요!"
+            "bio": m.mentor_intro or "반가워요!",
+            "views": m.views or 0,
         })
     return mentors_data
 
@@ -58,11 +53,10 @@ def get_mentor_detail(mentor_id: int, db: Session = Depends(get_db)):
     if not mentor:
         raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
 
-    # 💡 [핵심 수정] 사진은 Mentor가 아니라 User 테이블에 있습니다!
-    # 멘토의 user_id를 이용해 User 테이블에서 사진을 꺼내옵니다.
+    mentor.views = (mentor.views or 0) + 1
+    db.commit()
+    db.refresh(mentor)
     user = db.query(User).filter(User.id == mentor.user_id).first()
-    
-    # 유저 정보가 있으면 프로필 사진을 가져오고, 없으면 None 처리
     actual_profile_image = user.profile_image if user else None
 
     return {
@@ -79,7 +73,8 @@ def get_mentor_detail(mentor_id: int, db: Session = Depends(get_db)):
             actual_profile_image and 
             actual_profile_image != "null" and 
             "unsplash" not in actual_profile_image
-        ) else "https://upload.wikimedia.org/wikipedia/commons/7/7c/Profile_avatar_placeholder_large.png"
+        ) else "https://upload.wikimedia.org/wikipedia/commons/7/7c/Profile_avatar_placeholder_large.png",
+        "views": mentor.views,
     }
 @router.get("/api/mentor/details/{user_id}")
 def get_mentor_details(user_id: int, db: Session = Depends(get_db)):
