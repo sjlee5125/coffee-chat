@@ -33,7 +33,7 @@ class ProfileUpdateRequest(BaseModel):
     portfolio_url: Optional[str] = None
     profile_image: Optional[str] = None
     phone_number: Optional[str] = None
-    
+    portfolio_file_path: Optional[str] = None
     # 일반 프로필 4인방
     hashtags: Optional[str] = None
     experience: Optional[str] = None
