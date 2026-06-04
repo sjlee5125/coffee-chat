@@ -7,42 +7,50 @@ from schemas import MentorRegisterRequest, AvailabilityBulkRequest, PenaltyReque
 from sqlalchemy import desc
 router = APIRouter(tags=["Mentors"])
 from .matching import calc_match_score
+
+
 @router.get("/api/mentors/recommended")
 async def get_recommended_mentors(user_id: int, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.id == user_id).first()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        # 유저가 없으면 그냥 멘토 전부 반환
+        if not user:
+            mentors = db.query(User).filter(User.is_mentor == True).all()
+        else:
+            mentors = db.query(User).filter(
+                User.is_mentor == True,
+                User.id != user_id
+            ).all()
 
-    if not user:
-        return db.query(User).filter(User.is_mentor == True).all()
+        scored_mentors = []
+        for mentor in mentors:
+            try:
+                # 여기서 에러가 나는지 확인
+                score, reasons = calc_match_score(user, mentor)
+                scored_mentors.append({
+                    "id": mentor.id,
+                    "name": mentor.name or "호스트",
+                    "bio": mentor.bio or "",
+                    "mentor_intro": getattr(mentor, "mentor_intro", ""),
+                    "profile_image": mentor.profile_image or "",
+                    "job_title": mentor.job_title or "직무 미정",
+                    "main_category": mentor.main_category or "",
+                    "sub_category": mentor.sub_category or "",
+                    "status": mentor.status or "현직자",
+                    "hashtags": mentor.hashtags or "",
+                    "mentor_keywords": mentor.mentor_keywords or "[]",
+                    "match_score": score,
+                    "match_reasons": reasons[:3],
+                })
+            except Exception as e:
+                print(f"❌ 멘토 {mentor.id} 처리 중 에러 발생: {e}")
+                continue # 한 명 에러 나도 전체는 보여주도록
 
-    mentors = db.query(User).filter(
-        User.is_mentor == True,
-        User.id != user_id
-    ).all()
-
-    scored_mentors = []
-    for mentor in mentors:
-        score, reasons = calc_match_score(user, mentor)  # ← 그대로 호출
-        scored_mentors.append({
-            "id": mentor.id,
-            "name": mentor.name,
-            "bio": mentor.bio,
-            "mentor_intro": mentor.mentor_intro,
-            "profile_image": mentor.profile_image,
-            "job_title": mentor.job_title,
-            "main_category": mentor.main_category,
-            "sub_category": mentor.sub_category,
-            "status": mentor.status,
-            "hashtags": mentor.hashtags,
-            "mentor_keywords": mentor.mentor_keywords,
-            "mentoring_topics": mentor.mentoring_topics,
-            "career_history": mentor.career_history,
-            "detailed_experience": mentor.detailed_experience,
-            "match_score": score,
-            "match_reasons": reasons[:3],
-        })
-
-    scored_mentors.sort(key=lambda x: x["match_score"], reverse=True)
-    return scored_mentors
+        scored_mentors.sort(key=lambda x: x["match_score"], reverse=True)
+        return scored_mentors
+    except Exception as e:
+        print(f"🚨 get_recommended_mentors 전체 에러: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/api/mentors")
 def get_mentors(db: Session = Depends(get_db)):
