@@ -13,21 +13,13 @@ from .matching import calc_match_score
 async def get_recommended_mentors(user_id: int, db: Session = Depends(get_db)):
     try:
         user = db.query(User).filter(User.id == user_id).first()
-
-        # 🚀 수정: User 테이블과 Mentor 테이블을 JOIN하여 멘토인 유저만 가져옴
-        query = db.query(User).join(Mentor, User.id == Mentor.user_id)
-        
-        if user:
-            # 본인은 제외
-            query = query.filter(User.id != user_id)
-            
-        mentors = query.all()
+        # User와 Mentor를 JOIN하여 멘토 테이블에 정보가 있는 유저만 가져옴
+        mentors = db.query(User).join(Mentor, User.id == Mentor.user_id).filter(User.id != user_id).all()
 
         scored_mentors = []
         for mentor_user in mentors:
-            # JOIN 결과에서 mentor 정보는 mentor_user.mentor 속성으로 접근 가능(Relationship 설정 시)
-            # 여기서는 단순히 멘토 테이블에서 데이터를 가져옴
-            mentor_info = db.query(Mentor).filter(Mentor.user_id == mentor_user.id).first()
+            # 💡 mentor_user.mentor_profile (아까 추가한 relationship)을 사용
+            mentor_info = mentor_user.mentor_profile 
             
             try:
                 score, reasons = calc_match_score(user, mentor_user) if user else (0, [])
@@ -36,6 +28,7 @@ async def get_recommended_mentors(user_id: int, db: Session = Depends(get_db)):
                     "id": mentor_user.id,
                     "name": mentor_user.name or "호스트",
                     "bio": mentor_user.bio or "",
+                    # 💡 여기가 핵심: user가 아니라 mentor_info(Mentor 모델)에서 가져와야 함
                     "mentor_intro": mentor_info.mentor_intro if mentor_info else "",
                     "profile_image": mentor_user.profile_image or "",
                     "job_title": mentor_info.job_title if mentor_info else "직무 미정",
@@ -48,7 +41,7 @@ async def get_recommended_mentors(user_id: int, db: Session = Depends(get_db)):
                     "match_reasons": reasons[:3],
                 })
             except Exception as e:
-                print(f"❌ 멘토 {mentor_user.id} 처리 중 에러: {e}")
+                print(f"❌ 멘토 {mentor_user.id} 데이터 추출 중 에러: {e}")
                 continue
 
         scored_mentors.sort(key=lambda x: x["match_score"], reverse=True)
