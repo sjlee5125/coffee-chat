@@ -6,7 +6,7 @@ from sqlalchemy import (
     Enum, DateTime, ForeignKey, Date, Boolean, func, UniqueConstraint
 )
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker,relationship
 
 
 
@@ -53,7 +53,7 @@ class User(Base):
     profile_image = Column(Text, nullable=True)
     phone_number = Column(String(20), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
-
+    mentor_profile = relationship("Mentor", backref="user", uselist=False)
 
 class Mentor(Base):
     __tablename__ = "mentors"

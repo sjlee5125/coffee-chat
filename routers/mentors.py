@@ -13,45 +13,49 @@ from .matching import calc_match_score
 async def get_recommended_mentors(user_id: int, db: Session = Depends(get_db)):
     try:
         user = db.query(User).filter(User.id == user_id).first()
-        # 유저가 없으면 그냥 멘토 전부 반환
-        if not user:
-            mentors = db.query(User).filter(User.is_mentor == True).all()
-        else:
-            mentors = db.query(User).filter(
-                User.is_mentor == True,
-                User.id != user_id
-            ).all()
+
+        # 🚀 수정: User 테이블과 Mentor 테이블을 JOIN하여 멘토인 유저만 가져옴
+        query = db.query(User).join(Mentor, User.id == Mentor.user_id)
+        
+        if user:
+            # 본인은 제외
+            query = query.filter(User.id != user_id)
+            
+        mentors = query.all()
 
         scored_mentors = []
-        for mentor in mentors:
+        for mentor_user in mentors:
+            # JOIN 결과에서 mentor 정보는 mentor_user.mentor 속성으로 접근 가능(Relationship 설정 시)
+            # 여기서는 단순히 멘토 테이블에서 데이터를 가져옴
+            mentor_info = db.query(Mentor).filter(Mentor.user_id == mentor_user.id).first()
+            
             try:
-                # 여기서 에러가 나는지 확인
-                score, reasons = calc_match_score(user, mentor)
+                score, reasons = calc_match_score(user, mentor_user) if user else (0, [])
+                
                 scored_mentors.append({
-                    "id": mentor.id,
-                    "name": mentor.name or "호스트",
-                    "bio": mentor.bio or "",
-                    "mentor_intro": getattr(mentor, "mentor_intro", ""),
-                    "profile_image": mentor.profile_image or "",
-                    "job_title": mentor.job_title or "직무 미정",
-                    "main_category": mentor.main_category or "",
-                    "sub_category": mentor.sub_category or "",
-                    "status": mentor.status or "현직자",
-                    "hashtags": mentor.hashtags or "",
-                    "mentor_keywords": mentor.mentor_keywords or "[]",
+                    "id": mentor_user.id,
+                    "name": mentor_user.name or "호스트",
+                    "bio": mentor_user.bio or "",
+                    "mentor_intro": mentor_info.mentor_intro if mentor_info else "",
+                    "profile_image": mentor_user.profile_image or "",
+                    "job_title": mentor_info.job_title if mentor_info else "직무 미정",
+                    "main_category": mentor_info.main_category if mentor_info else "",
+                    "sub_category": mentor_info.sub_category if mentor_info else "",
+                    "status": mentor_info.status if mentor_info else "현직자",
+                    "hashtags": mentor_user.hashtags or "",
+                    "mentor_keywords": mentor_info.mentoring_topics if mentor_info else "[]",
                     "match_score": score,
                     "match_reasons": reasons[:3],
                 })
             except Exception as e:
-                print(f"❌ 멘토 {mentor.id} 처리 중 에러 발생: {e}")
-                continue # 한 명 에러 나도 전체는 보여주도록
+                print(f"❌ 멘토 {mentor_user.id} 처리 중 에러: {e}")
+                continue
 
         scored_mentors.sort(key=lambda x: x["match_score"], reverse=True)
         return scored_mentors
     except Exception as e:
         print(f"🚨 get_recommended_mentors 전체 에러: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 @router.get("/api/mentors")
 def get_mentors(db: Session = Depends(get_db)):
     results = db.query(Mentor).order_by(desc(Mentor.views)).all()
