@@ -53,8 +53,7 @@ class User(Base):
     profile_image = Column(Text, nullable=True)
     phone_number = Column(String(20), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
-    mentor_profile = relationship("Mentor", backref="user", uselist=False)
-
+    mentor_profile = relationship("Mentor", backref="user_ref", uselist=False)    
 class Mentor(Base):
     __tablename__ = "mentors"
     __table_args__ = {'schema': 'public'}
@@ -72,7 +71,7 @@ class Mentor(Base):
     main_category = Column(String(100), nullable=True) # '개발/엔지니어링'
     sub_category = Column(String(100), nullable=True)  # '백엔드' 등      
     views = Column(Integer, default=0, nullable=False)
-
+    user_id = Column(Integer, ForeignKey("public.users.id"), unique=True, nullable=False)
 class Booking(Base):
     __tablename__ = "bookings"
     __table_args__ = {'schema': 'public'}
