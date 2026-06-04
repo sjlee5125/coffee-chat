@@ -19,27 +19,30 @@ async def get_recommended_mentors(user_id: int, db: Session = Depends(get_db)):
         mentors = db.query(User).join(Mentor, User.id == Mentor.user_id).filter(User.id != user_id).all()
 
         scored_mentors = []
+        # 여기서 user는 '멘토링을 하는 유저(User 모델)'입니다.
         for user in mentors:
-            # JOIN으로 가져온 user와 연결된 Mentor 객체를 별도로 조회
+            # 1. 멘토 정보 객체를 별도로 가져옵니다.
             m_info = db.query(Mentor).filter(Mentor.user_id == user.id).first()
             
             # score 계산
             score, reasons = calc_match_score(current_user, user) if current_user else (0, [])
             
-            # 💡 안전하게 m_info(Mentor 모델)와 user(User 모델)에서 데이터 분리 추출
+            # 2. 모든 속성을 m_info(Mentor)와 user(User)에서 적절히 분리!
             scored_mentors.append({
                 "id": user.id,
                 "name": user.name or "호스트",
                 "bio": user.bio or "",
-                "mentor_intro": m_info.mentor_intro if m_info else "",
                 "profile_image": user.profile_image or "",
+                "hashtags": user.hashtags or "",
+                
+                # Mentor 테이블에만 있는 정보는 m_info에서 가져옴!
+                "mentor_intro": m_info.mentor_intro if m_info else "",
                 "job_title": m_info.job_title if m_info else "직무 미정",
                 "main_category": m_info.main_category if m_info else "",
                 "sub_category": m_info.sub_category if m_info else "",
                 "status": m_info.status if m_info else "현직자",
-                "hashtags": user.hashtags or "",
-                # 문자열로 저장된 JSON을 파싱하거나 그대로 전달
                 "mentor_keywords": m_info.mentoring_topics if m_info else "[]",
+                
                 "match_score": score,
                 "match_reasons": reasons[:3],
             })
