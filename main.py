@@ -26,7 +26,7 @@ app = FastAPI()
 app.include_router(webrtc.router)
 # 💡 2. 아래 두 줄을 추가해서 진짜 STT와 LLM 라우터를 서버에 붙여줍니다!
 app.include_router(stt.router)
-app.include_router(llm_chat.router)# 💡 [CORS 설정]
+app.include_router(lim_chat.router)# 💡 [CORS 설정]
 origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
