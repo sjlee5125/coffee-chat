@@ -253,6 +253,13 @@ def get_mentee_bookings(user_id: int, db: Session = Depends(get_db)):
     if not bookings:
         return []   
     return result 
+
+@router.get("/detail/{booking_id}")  # <-- /api/booking/detail/78
+def get_booking(booking_id: int, db: Session = Depends(get_db)):
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="예약 정보를 찾을 수 없습니다.")
+    return booking
 @router.get("/{user_id}")
 def get_bookings(user_id: int, db: Session = Depends(get_db)):
     print(f" [예약 목록 조회] User ID: {user_id}")
