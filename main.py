@@ -17,7 +17,7 @@ import auth
 from models import User, Mentor, Booking, MentorAvailability, ChatSession, get_db, create_tables
 
 # 💡 새로 분리한 기능별 라우터들을 가져옵니다.
-from routers import users, mentors, bookings, ai, notifications, chat, webrtc, stt, lim_chat
+from routers import users, mentors, bookings, ai, notifications, chat, webrtc, stt,lim_chat
 # 서버 실행 시 시스템의 .env 환경변수를 로드 및 DB 초기화
 load_dotenv()
 #create_tables()
@@ -116,10 +116,10 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
         print(f" [ 카카오 콜백 에러]: {str(e)}")
         return RedirectResponse(url="http://localhost:5173/login?error=true", status_code=status.HTTP_302_FOUND)
 
-from routers import webrtc, stt, llm_chat
+from routers import webrtc, stt, lim_chat
 app.include_router(webrtc.router)
 app.include_router(stt.router)
-app.include_router(llm_chat.router)
+app.include_router(lim_chat.router)
 
 if __name__ == "__main__":
     import uvicorn
