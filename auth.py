@@ -18,7 +18,8 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60
 KAKAO_CLIENT_ID = "e2eb2fe1d550c2b3da05dcad347a4517"
 KAKAO_REDIRECT_URI = "http://48.211.169.52:8000/login/kakao/callback"
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
+class EmailCheckRequest(BaseModel):
+    email: str
 # Pydantic 모델
 class UserRegisterRequest(BaseModel):
     email: str
@@ -52,7 +53,12 @@ def create_access_token(data: dict):
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-
+@router.post("/check-email")
+def check_email(req: EmailCheckRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == req.email).first()
+    if user:
+        raise HTTPException(status_code=400, detail="이미 등록된 이메일입니다.")
+    return {"message": "사용 가능한 이메일입니다."}
 # 3. API 엔드포인트
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 def register(request: UserRegisterRequest, db: Session = Depends(get_db)):
