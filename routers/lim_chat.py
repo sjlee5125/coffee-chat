@@ -17,7 +17,27 @@ import os
 from typing import Dict, List
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from secure_pipeline_final import agent_regex_masking, agent_azure_pii, agent_llm_masking, agent_llm_summary
+
+router = APIRouter()
+
+@router.get("/{chat_id}/summary")
+async def get_chat_summary(chat_id: int):
+    
+    # 1. DB에서 chat_id에 해당하는 대화 내용을 가져옵니다 (가정)
+    # raw_text = db.query(ChatSession).filter(ChatSession.id == chat_id).first().content
+    raw_text = "..." # 실제 DB 조회 로직 대체
+
+    # 2. 파이프라인 가동
+    step0 = agent_regex_masking(raw_text)
+    step1 = agent_azure_pii(step0)
+    step2 = agent_llm_masking(step1)
+    final_json_str = agent_llm_summary(step2)
+    
+    # 3. JSON 파싱 후 프론트로 반환
+    import json
+    return json.loads(final_json_str)
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -66,8 +86,7 @@ def _build_system_prompt(stt_transcripts: List[dict], questions: str) -> str:
 - 대화 중 나온 기술 용어나 개념을 간략하게 설명할 수 있습니다.
 - 답변은 간결하고 실용적으로, 3~5문장 내외로 작성합니다.
 - 한국어로 답변합니다."""
-
-
+    
 @router.websocket("/ws/llm/{booking_id}/{user_id}")
 async def llm_assistant(
     websocket: WebSocket,
