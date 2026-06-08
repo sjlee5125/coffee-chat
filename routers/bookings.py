@@ -290,7 +290,7 @@ def get_booking(booking_id: int, db: Session = Depends(get_db)):
         "mentor_name": mentor.name if mentor else "멘토",
         "user_name": mentee_user.name if mentee_user else "멘티"
     }
-@router.post("/payment/verify")
+router.post("/payment/verify")
 def verify_payment(data: PaymentVerifyRequest):
     portone_secret = os.getenv("PORTONE_API_SECRET")
 
@@ -304,18 +304,26 @@ def verify_payment(data: PaymentVerifyRequest):
         }
     )
 
+    print("PortOne status code:", res.status_code)
+    print("PortOne response:", res.text)
+
     if res.status_code != 200:
-        raise HTTPException(status_code=400, detail="결제 정보를 확인할 수 없습니다.")
+        raise HTTPException(status_code=400, detail=f"포트원 결제 조회 실패: {res.text}")
 
     payment = res.json()
+    print("payment status:", payment.get("status"))
+    print("payment amount:", payment.get("amount"))
 
     if payment.get("status") != "PAID":
-        raise HTTPException(status_code=400, detail="결제가 완료되지 않았습니다.")
+        raise HTTPException(status_code=400, detail=f"결제가 완료되지 않았습니다. 현재 상태: {payment.get('status')}")
 
     paid_amount = payment.get("amount", {}).get("total")
 
     if paid_amount != data.amount:
-        raise HTTPException(status_code=400, detail="결제 금액이 일치하지 않습니다.")
+        raise HTTPException(
+            status_code=400,
+            detail=f"결제 금액이 일치하지 않습니다. 결제금액: {paid_amount}, 요청금액: {data.amount}"
+        )
 
     return {
         "success": True,
