@@ -76,10 +76,11 @@ def _make_push_stream_recognizer(room_id: str, speaker_name: str, loop: asyncio.
         subscription=AZURE_SPEECH_KEY,
         region=AZURE_SPEECH_REGION,
     )
+    
     speech_config.speech_recognition_language = "ko-KR"
     # 중간 결과도 수신
     speech_config.set_property(
-        speechsdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "1500"
+        speechsdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "500"
     )
 
     stream = speechsdk.audio.PushAudioInputStream(
