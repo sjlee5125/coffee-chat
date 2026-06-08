@@ -155,19 +155,25 @@ async def stt_endpoint(
         })
 
     try:
-           while True:
+        while True:
             msg = await websocket.receive()
+
+            # 💡 [핵심 추가 포인트] 클라이언트가 연결을 끊으면 즉시 루프 탈출
+            if msg.get("type") == "websocket.disconnect":
+                logger.info(f"[STT] 클라이언트가 웹소켓 연결을 종료했습니다. (Disconnect 감지)")
+                break
+
             if "bytes" in msg and push_stream:
-                # 💡 데이터가 서버로 잘 들어오고 있는지 확인
                 if len(msg["bytes"]) > 0:
-                    logger.info(f"🎤 [STT] 오디오 청크 수신: {len(msg['bytes'])} bytes") 
+                    # 너무 자주 찍히면 성능 저하가 올 수 있으니 디버깅 후엔 주석 처리 추천
+                    # logger.info(f"🎤 [STT] 오디오 청크 수신: {len(msg['bytes'])} bytes") 
                     push_stream.write(msg["bytes"])
 
-                elif "text" in msg:
-                    try:
-                        data = json.loads(msg["text"])
-                    except json.JSONDecodeError:
-                        continue
+            elif "text" in msg:
+                try:
+                    data = json.loads(msg["text"])
+                except json.JSONDecodeError:
+                    continue
 
                 if data.get("type") == "end_session":
                     # ── 세션 종료: STT 결과 DB 저장 ───────────
