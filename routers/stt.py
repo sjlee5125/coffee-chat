@@ -27,7 +27,8 @@ from sqlalchemy.orm import Session
 load_dotenv()
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["STT"])
-
+print(f"DEBUG: STT KEY={AZURE_SPEECH_KEY}")
+print(f"DEBUG: STT REGION={AZURE_SPEECH_REGION}")
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY") 
 AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "koreacentral")
 # Azure SDK는 선택적 import (키가 없는 환경에서도 서버가 뜨도록)
