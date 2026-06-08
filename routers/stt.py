@@ -81,7 +81,7 @@ def _make_push_stream_recognizer(room_id: str, speaker_name: str, loop: asyncio.
     )
 
     stream = speechsdk.audio.PushAudioInputStream(
-        speechsdk.audio.AudioStreamFormat.get_wave_format_pcm(16000, 16, 1)
+        speechsdk.audio.AudioStreamFormat(samples_per_second=16000, bits_per_sample=16, channels=1)
     )
     audio_config = speechsdk.audio.AudioConfig(stream=stream)
     recognizer = speechsdk.SpeechRecognizer(
