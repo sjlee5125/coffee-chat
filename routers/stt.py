@@ -27,8 +27,7 @@ from sqlalchemy.orm import Session
 load_dotenv()
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["STT"])
-print(f"DEBUG: STT KEY={AZURE_SPEECH_KEY}")
-print(f"DEBUG: STT REGION={AZURE_SPEECH_REGION}")
+
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY") 
 AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "koreacentral")
 # Azure SDK는 선택적 import (키가 없는 환경에서도 서버가 뜨도록)
@@ -40,7 +39,9 @@ except ImportError:
     SPEECH_AVAILABLE = False
     logger.warning("⚠️  azure-cognitiveservices-speech 미설치. STT 비활성화.")
 
-
+# routers/stt.py 파일의 load_dotenv() 바로 아래에 추가
+print(f"DEBUG: STT KEY={AZURE_SPEECH_KEY}")
+print(f"DEBUG: STT REGION={AZURE_SPEECH_REGION}")
 # ──────────────────────────────────────────────
 # 방별 STT 상태 관리
 # ──────────────────────────────────────────────
