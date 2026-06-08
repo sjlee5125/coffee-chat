@@ -94,6 +94,7 @@ def _make_push_stream_recognizer(room_id: str, speaker_name: str, loop: asyncio.
     room_state = stt_rooms[room_id]
 
     def on_recognized(evt):
+        logger.info(f"[STT] Azure 원본 응답: {evt.result.reason}, 텍스트: '{evt.result.text}'")
         text = evt.result.text.strip()
         if not text:
             return
