@@ -290,7 +290,7 @@ def get_booking(booking_id: int, db: Session = Depends(get_db)):
         "mentor_name": mentor.name if mentor else "멘토",
         "user_name": mentee_user.name if mentee_user else "멘티"
     }
-router.post("/payment/verify")
+@router.post("/payment/verify")
 def verify_payment(data: PaymentVerifyRequest):
     portone_secret = os.getenv("PORTONE_API_SECRET")
 
@@ -311,11 +311,12 @@ def verify_payment(data: PaymentVerifyRequest):
         raise HTTPException(status_code=400, detail=f"포트원 결제 조회 실패: {res.text}")
 
     payment = res.json()
-    print("payment status:", payment.get("status"))
-    print("payment amount:", payment.get("amount"))
 
     if payment.get("status") != "PAID":
-        raise HTTPException(status_code=400, detail=f"결제가 완료되지 않았습니다. 현재 상태: {payment.get('status')}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"결제가 완료되지 않았습니다. 현재 상태: {payment.get('status')}"
+        )
 
     paid_amount = payment.get("amount", {}).get("total")
 
