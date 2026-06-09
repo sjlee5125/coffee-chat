@@ -15,10 +15,10 @@ DEPLOYMENT_NAME = "ai_advice"
 
 # 3. 위에서 만든 AZURE_API_KEY가 여기에 아주 자연스럽게 들어갑니다.
 client = AzureOpenAI(
-    api_key=AZURE_API_KEY,
-    api_version=API_VERSION,
-    azure_endpoint=AZURE_ENDPOINT
-)
+     api_key=AZURE_API_KEY,
+     api_version=API_VERSION,
+     azure_endpoint=AZURE_ENDPOINT
+ )
 
 def generate_wrapup_report(host_text: str, guest_text: str) -> str:
     system_prompt = """
