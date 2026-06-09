@@ -146,7 +146,16 @@ class SavedMentor(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 # ─── 3. DB 헬퍼 및 제너레이터 ───
-
+class Review(Base):
+    __tablename__ = "reviews"
+    __table_args__ = {'schema': 'public'}
+    
+    id = Column(Integer, primary_key=True, index=True)
+    booking_id = Column(Integer, nullable=False) 
+    mentor_id = Column(Integer, nullable=False)  
+    user_id = Column(Integer, nullable=False)    
+    rating = Column(Integer, nullable=False)      
+    created_at = Column(DateTime, server_default=func.now())
 def create_tables():
     """안전하게 신규 스케줄/알림 스키마 동기화 테이블 생성"""
     Base.metadata.create_all(bind=engine)
