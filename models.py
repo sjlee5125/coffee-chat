@@ -131,6 +131,18 @@ class ChatSession(Base):
     status = Column(String(20), default="READY")
     created_at = Column(DateTime, server_default=func.now())
 
+class Review(Base):
+    __tablename__ = "reviews"
+    __table_args__ = {'schema': 'public'}
+
+    id = Column(Integer, primary_key=True, index=True)
+    booking_id = Column(Integer, nullable=True)
+    user_id = Column(Integer, nullable=True)
+    mentor_id = Column(Integer, nullable=True)
+    rating = Column(Integer, nullable=True)
+    review = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())    
+
 # ─── 3. DB 헬퍼 및 제너레이터 ───
 
 def create_tables():
@@ -151,5 +163,5 @@ if __name__ == "__main__":
     create_tables()
     print("테이블 생성 및 동기화 작업 완료!")
 
-# 깃 강제 업데이트용 주석
+
 
