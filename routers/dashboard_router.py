@@ -136,9 +136,6 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
     }
 
 
-# ════════════════════════════════════════════════════════════════
-#  멘티 대시보드  GET /api/mentee/dashboard/{user_id}
-# ════════════════════════════════════════════════════════════════
 @router.get("/mentee/dashboard/{user_id}")
 def mentee_dashboard(user_id: int, db: Session = Depends(get_db)):
 

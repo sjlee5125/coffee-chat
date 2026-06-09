@@ -126,9 +126,7 @@ from routers.dashboard_router import router as dashboard_router_obj
 app.include_router(webrtc.router)
 app.include_router(stt.router)
 app.include_router(lim_chat.router)
-app.include_router(dashboard_router_obj, prefix="/api/dashboard", tags=["Dashboard"])
-
-
+app.include_router(dashboard_router_obj)
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
