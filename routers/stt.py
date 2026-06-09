@@ -1,4 +1,3 @@
-# routers/stt.py
 """
 Azure Speech STT 연동
 ────────────────────────────────────────────────────────────
@@ -28,8 +27,6 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["STT"])
 
-AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY") 
-AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "koreacentral")
 # Azure SDK는 선택적 import (키가 없는 환경에서도 서버가 뜨도록)
 try:
     import azure.cognitiveservices.speech as speechsdk
@@ -78,7 +75,23 @@ def _make_push_stream_recognizer(room_id: str, speaker_name: str, loop: asyncio.
     )
     
     speech_config.speech_recognition_language = "ko-KR"
-    # 중간 결과도 수신
+    
+    # 💡 [1] 문장 부호 및 포맷팅 강제 옵션 (TrueText 알고리즘 적용)
+    # 문맥을 분석해 마침표, 물음표, 띄어쓰기를 더 정교하게 보정합니다.
+    speech_config.set_property(
+        speechsdk.PropertyId.SpeechServiceResponse_PostProcessingOption, "TrueText"
+    )
+
+    # 💡 [2] 비속어 필터링 (품질 유지)
+    # 대화 중 비속어가 섞일 경우 이를 마스킹(***) 처리하여 자막 품질을 깨끗하게 유지합니다.
+    speech_config.set_profanity(speechsdk.ProfanityOption.Masked)
+
+    # 💡 [3] 상세 출력 포맷 설정 (선택 사항)
+    # 기본값은 'Simple'이지만 'Detailed'로 설정하면 내부적으로 ITN(숫자 변환)이 
+    # 완벽하게 적용된 Display Text를 생성하는 데 도움을 줍니다.
+    speech_config.output_format = speechsdk.OutputFormat.Detailed
+
+    # 중간 결과도 수신하기 위한 딜레이 조정
     speech_config.set_property(
         speechsdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "500"
     )
