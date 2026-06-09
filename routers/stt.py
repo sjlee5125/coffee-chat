@@ -94,7 +94,7 @@ def _make_push_stream_recognizer(room_id: str, speaker_name: str, loop: asyncio.
 
     # 중간 결과도 수신하기 위한 딜레이 조정
     speech_config.set_property(
-        speechsdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "500"
+        speechsdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "1500"
     )
 
     stream = speechsdk.audio.PushAudioInputStream(
