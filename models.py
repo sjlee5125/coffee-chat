@@ -7,7 +7,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker,relationship
-
+from sqlalchemy import Column, Integer, String,DateTime, UniqueConstraint, Text
+from sqlalchemy.sql import func
+from database import Base
 
 
 # ─── 1. 데이터베이스 연결 설정 ───
@@ -131,8 +133,32 @@ class ChatSession(Base):
     status = Column(String(20), default="READY")
     created_at = Column(DateTime, server_default=func.now())
 
-# ─── 3. DB 헬퍼 및 제너레이터 ───
+class SavedMentor(Base):
+    """멘티가 관심(찜)한 멘토 목록"""
+    __tablename__ = "saved_mentors"
+    __table_args__ = (
+        UniqueConstraint('user_id', 'mentor_id', name='uq_saved_mentor'),
+        {'schema': 'public'}
+    )
+ 
+    id         = Column(Integer, primary_key=True, index=True)
+    user_id    = Column(Integer, nullable=False, index=True)   # 찜한 사람 (users.id)
+    mentor_id  = Column(Integer, nullable=False, index=True)   # 찜 대상  (mentors.id)
+    created_at = Column(DateTime, server_default=func.now())
 
+# ─── 3. DB 헬퍼 및 제너레이터 ───
+class Review(Base):
+    __tablename__ = "reviews"
+    __table_args__ = {'schema': 'public'}
+    
+    id = Column(Integer, primary_key=True, index=True)
+    booking_id = Column(Integer, nullable=False) 
+    mentor_id = Column(Integer, nullable=False)  
+    user_id = Column(Integer, nullable=False)    
+    rating = Column(Integer, nullable=False)      
+    # 💡 아래 한 줄을 추가하세요! (글을 안 남기는 사람도 있으니 nullable=True)
+    review = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
 def create_tables():
     """안전하게 신규 스케줄/알림 스키마 동기화 테이블 생성"""
     Base.metadata.create_all(bind=engine)
@@ -151,5 +177,5 @@ if __name__ == "__main__":
     create_tables()
     print("테이블 생성 및 동기화 작업 완료!")
 
-# 깃 강제 업데이트용 주석
+
 

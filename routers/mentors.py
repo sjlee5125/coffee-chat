@@ -185,7 +185,7 @@ def register_mentor(user_id: int, request: MentorRegisterRequest, db: Session = 
 
     db.commit()
     return {"message": "멘토 프로필 독립 등록 완료"}
-
+"""
 @router.get("/api/mentor/dashboard/{user_id}")
 def get_mentor_dashboard_data(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
@@ -225,7 +225,7 @@ def get_mentor_dashboard_data(user_id: int, db: Session = Depends(get_db)):
         "stats": stats_data,
         "upcoming_chats": upcoming_chats,
     }
-
+"""
 @router.get("/api/mentor/availability/{mentor_id}")
 def get_mentor_availability(mentor_id: int, db: Session = Depends(get_db)):
     mentor = db.query(Mentor).filter((Mentor.id == mentor_id) | (Mentor.user_id == mentor_id)).first()

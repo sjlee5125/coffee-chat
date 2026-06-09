@@ -15,13 +15,14 @@ from openai import AzureOpenAI
 from auth import router
 from models import User, Mentor, Booking, MentorAvailability, ChatSession, get_db, create_tables
 import auth
-from routers import users, mentors, bookings, ai, notifications, chat, chat_router, webrtc, stt, lim_chat, pipeline
-
+from routers import users, mentors, bookings, ai, notifications, chat, chat_router, webrtc, stt, lim_chat, pipeline, general_chat
 # 서버 실행 시 시스템의 .env 환경변수를 로드 및 DB 초기화
+from routers.dashboard_router import router as dashboard_router_obj
 load_dotenv()
 #create_tables()
 
 app = FastAPI()
+app.include_router(general_chat.router)
 app.include_router(webrtc.router)
 # 💡 2. 아래 두 줄을 추가해서 진짜 STT와 LLM 라우터를 서버에 붙여줍니다!
 app.include_router(stt.router)
@@ -119,11 +120,11 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
         print(f" [ 카카오 콜백 에러]: {str(e)}")
         return RedirectResponse(url="http://localhost:5173/login?error=true", status_code=status.HTTP_302_FOUND)
 
-from routers import webrtc, stt, lim_chat
+from routers.dashboard_router import router as dashboard_router_obj
 app.include_router(webrtc.router)
 app.include_router(stt.router)
 app.include_router(lim_chat.router)
-
+app.include_router(dashboard_router_obj)
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
