@@ -35,6 +35,7 @@ origins = [
     "http://localhost:8003"  
     "ws://localhost:8000",      # 웹소켓용 추가
     "ws://48.211.169.52:8000",  # 웹소켓용 추가 
+    
 ]
     
 app.add_middleware(
@@ -127,4 +128,4 @@ app.include_router(lim_chat.router)
 app.include_router(dashboard_router_obj)
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8003)
