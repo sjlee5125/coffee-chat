@@ -4,7 +4,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 # bookings.py 상단 수정
-from models import User, Mentor, Booking, MentorAvailability, Notification, get_db, ChatSession
+from models import User, Mentor, Booking, MentorAvailability, Notification, get_db, ChatSession, Review
 from routers.notifications import manager 
 from datetime import datetime, timedelta
 import requests
@@ -25,6 +25,14 @@ class PaymentVerifyRequest(BaseModel):
     paymentId: str
     orderId: str
     amount: int
+
+class ReviewCreateRequest(BaseModel):
+    booking_id: int
+    user_id: int
+    mentor_id: int
+    rating: int
+    review: str
+
 # ==========================================================
 # 1. 커피챗 예약 생성 (async 적용)
 # ==========================================================
@@ -245,8 +253,13 @@ def get_mentee_bookings(user_id: int, db: Session = Depends(get_db)):
         mentor = db.query(Mentor).filter(Mentor.id == b.mentor_id).first()
         mentor_user = db.query(User).filter(User.id == mentor.user_id).first() if mentor else None
         
+        # 💡 [추가] 이 예약(booking_id)에 대한 리뷰가 이미 존재하는지 확인
+        has_review = db.query(Review).filter(Review.booking_id == b.id).first() is not None
+        
         result.append({
             "booking_id": b.id,
+            "mentor_id": b.mentor_id,  # 💡 [추가] 프론트엔드에서 리뷰 작성 시 사용할 수 있도록 mentor_id 전달
+            "has_review": has_review,  # 💡 [추가] 리뷰 작성 완료 여부 전달
             "partner_name": mentor.name if mentor else "알 수 없는 멘토",
             "partner_image": mentor_user.profile_image if mentor_user and hasattr(mentor_user, 'profile_image') else None,
             "booking_date": str(b.booking_date) if b.booking_date else "", 
@@ -257,7 +270,7 @@ def get_mentee_bookings(user_id: int, db: Session = Depends(get_db)):
         })
     if not bookings:
         return []   
-    return result 
+    return result
 
 @router.get("/detail/{booking_id}")  # <-- /api/booking/detail/78
 def get_booking(booking_id: int, db: Session = Depends(get_db)):
@@ -399,5 +412,90 @@ def get_bookings(user_id: int, db: Session = Depends(get_db)):
             "created_at": str(b.created_at)
         })
 
+    
+    return result
+
+@router.post("/review/create")
+def create_review(request: ReviewCreateRequest, db: Session = Depends(get_db)):
+    print(f" [리뷰 생성] booking_id={request.booking_id}, rating={request.rating}")
+
+    # 리뷰 저장
+    review = Review(
+        booking_id=request.booking_id,
+        user_id=request.user_id,
+        mentor_id=request.mentor_id,
+        rating=request.rating,
+        review=request.review
+    )
+    db.add(review)
+
+    # mentors 테이블 avg_rating 업데이트
+    mentor = db.query(Mentor).filter(Mentor.id == request.mentor_id).first()
+    if mentor:
+        reviews = db.query(Review).filter(Review.mentor_id == request.mentor_id).all()
+        total = sum(r.rating for r in reviews) + request.rating
+        count = len(reviews) + 1
+        mentor.avg_rating = total / count
+
+    db.commit()
+    return {"message": "리뷰가 저장됐어요!"}
+
+@router.get("/reviews/{mentor_id}")
+def get_mentor_reviews(mentor_id: int, db: Session = Depends(get_db)):
+    print(f" [멘토 리뷰 조회] mentor_id={mentor_id}")
+    
+    reviews = db.query(Review).filter(Review.mentor_id == mentor_id).all()
+    
+    result = []
+    for r in reviews:
+        # 리뷰 작성자 이름 가져오기
+        user = db.query(User).filter(User.id == r.user_id).first()
+        result.append({
+            "id": r.id,
+            "booking_id": r.booking_id,
+            "user_id": r.user_id,
+            "author": user.name if user else "익명",
+            "author_image": user.profile_image if user else "",
+            "rating": r.rating,
+            "comment": r.review,
+            "created_at": str(r.created_at)
+        })
+    
+    return result
+
+@router.get("/recommend/{booking_id}")
+def get_recommended_mentors(booking_id: int, db: Session = Depends(get_db)):
+    # 1. 현재 booking의 mentor 직무 가져오기
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        return []
+    
+    current_mentor = db.query(Mentor).filter(Mentor.id == booking.mentor_id).first()
+    if not current_mentor:
+        return []
+    
+    # 2. 같은 직무의 다른 멘토 3명 추천
+    similar_mentors = db.query(Mentor).filter(
+        Mentor.job_title == current_mentor.job_title,
+        Mentor.id != current_mentor.id
+    ).limit(3).all()
+    
+    # 3. 없으면 전체에서 랜덤 3명
+    if len(similar_mentors) < 3:
+        from sqlalchemy import func
+        similar_mentors = db.query(Mentor).filter(
+            Mentor.id != current_mentor.id
+        ).order_by(func.random()).limit(3).all()
+    
+    result = []
+    for m in similar_mentors:
+        user = db.query(User).filter(User.id == m.user_id).first()
+        result.append({
+            "mentor_id": m.user_id,
+            "name": m.name,
+            "job_title": m.job_title or "직무 미정",
+            "profile_image": user.profile_image if user else "",
+            "avg_rating": getattr(m, 'avg_rating', 0) or 0
+        })
     
     return result
