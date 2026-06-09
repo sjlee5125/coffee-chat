@@ -5,7 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from models import Booking, ChatSession, get_db
-from routers.pipeline import agent_regex_masking, agent_azure_pii, agent_llm_masking, agent_llm_summary
+from routers.pipeline import agent_regex_masking, agent_azure_pii, agent_llm_masking, agent_llm_summary, generate_pdf_report
 import json
 
 router = APIRouter(tags=["Chat & Review"])
@@ -88,41 +88,15 @@ def get_chat_session(booking_id: int, db: Session = Depends(get_db)):
     if not session:
         return {"status": "READY"}
     
-    # DB에 저장된 요약본(JSON)을 가져옵니다.
-    summary_data = session.ai_summary
-    display_text = summary_data # 기본값은 일단 가져온 그대로.
-
-    if summary_data and isinstance(summary_data, str) and summary_data.strip().startswith("{"):
-        try:
-            import json
-            # JSON을 파싱해서 줄글로 변환하는 '번역기'입니다.
-            parsed = json.loads(summary_data.replace("```json", "").replace("```", "").strip())
-            
-            meta = parsed.get("session_metadata", {})
-            agendas = parsed.get("core_agendas", [])
-            consensus = parsed.get("session_consensus", "내용 없음")
-
-            # PDF와 동일한 줄글 리포트 생성!
-            pretty_text = f"1. 게스트 상황 및 목표\n[현재 상황]\n{meta.get('guest_as_is', '내용 없음')}\n\n[목표]\n{meta.get('guest_to_be', '내용 없음')}\n\n"
-            pretty_text += "2. 핵심 논의 안건\n"
-            if agendas:
-                for i, a in enumerate(agendas, 1):
-                    pretty_text += f"{i}. {a.get('agenda_title', '안건')}\n"
-                    pretty_text += f"- 질문: {a.get('guest_context', '내용 없음')}\n"
-                    pretty_text += f"- 해결책: {a.get('host_solution', '내용 없음')}\n\n"
-            pretty_text += f"3. 최종 합의점 및 결론\n{consensus}"
-            
-            display_text = pretty_text # 화면에 나갈 텍스트를 줄글로 교체!
-        except Exception as e:
-            print(f"번역기 에러: {e}")
-
     return {
         "session_id": session.id,
         "status": session.status,
         "started_at": str(session.started_at) if session.started_at else None,
-        "ai_summary": display_text # 👈 이제 줄글이 들어갑니다!
+        "ended_at": str(session.ended_at) if session.ended_at else None,
+        "duration_sec": session.duration_sec,
+        "stt_text": session.stt_text,
+        "ai_summary": session.ai_summary
     }
-
 # ==========================================
 # 2. 리뷰 생성 API
 # ==========================================
@@ -189,12 +163,32 @@ async def generate_summary(chat_id: int, request: Request, db: Session = Depends
 
         # 💡 [수정됨] 엔터가 쳐져 있던 부분을 한 줄로 예쁘게 이었습니다!
         final_json_str = final_json_str.replace("```json", "").replace("```", "").strip()
+        parsed = json.loads(final_json_str)
 
-        # 🚨 [핵심] 번역 없이 'JSON 원본'을 그대로 DB에 저장합니다! (PDF 생성을 위해)
+        # PDF용 JSON 파일 저장
+        os.makedirs("summary_data", exist_ok=True)
+        with open(f"summary_data/{chat_id}.json", "w", encoding="utf-8") as f:
+            json.dump(parsed, f, ensure_ascii=False)
+
+        # 줄글 변환
+        meta = parsed.get("session_metadata", {})
+        agendas = parsed.get("core_agendas", [])
+        consensus = parsed.get("session_consensus", "내용 없음")
+
+        pretty_text = "1. 게스트 상황 및 목표\n"
+        pretty_text += f"[현재 상황]\n{meta.get('guest_as_is', '내용 없음')}\n\n"
+        pretty_text += f"[목표]\n{meta.get('guest_to_be', '내용 없음')}\n\n"
+        pretty_text += "2. 핵심 논의 안건\n"
+        for i, a in enumerate(agendas, 1):
+            pretty_text += f"주제 {i}: {a.get('agenda_title', '')}\n"
+            pretty_text += f"- 게스트 상황/질문: {a.get('guest_context', '')}\n"
+            pretty_text += f"- 호스트 해결책: {a.get('host_solution', '')}\n\n"
+        pretty_text += f"3. 최종 합의점 및 결론\n{consensus}"
+
+        # DB에는 줄글 저장
         if session:
-            session.ai_summary = final_json_str
+            session.ai_summary = pretty_text  # ← 여기가 핵심!
             db.commit()
-            print(f"💾 [{chat_id}번 방] JSON 원본 DB 저장 완료!")
         
         return {"message": "요약본 생성 성공"}
 
@@ -212,25 +206,13 @@ import os
 
 @router.get("/api/chat-session/{chat_id}/summary-pdf")
 async def download_summary_pdf(chat_id: int, db: Session = Depends(get_db)):
-    session = db.query(ChatSession).filter(ChatSession.booking_id == chat_id).first()
-    if not session or not session.ai_summary:
-        raise HTTPException(status_code=404, detail="요약본 없음. 먼저 generate-summary를 호출해주세요.")
-
-    import json
-    from routers.pipeline import generate_pdf_report # 👈 pipeline.py의 원래 능력을 그대로 빌려옵니다!
+    json_file_path = f"summary_data/{chat_id}.json"
+    if not os.path.exists(json_file_path):
+        raise HTTPException(status_code=404, detail="요약 데이터가 없습니다.")
     
-    try:
-        # 💡 DB에 저장된 완벽한 JSON을 파이썬 딕셔너리로 읽어들입니다.
-        parsed_json = json.loads(session.ai_summary)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="PDF 변환 에러: JSON 형식이 올바르지 않습니다.")
-
+    with open(json_file_path, "r", encoding="utf-8") as f:
+        parsed = json.load(f)
+    
     pdf_path = f"summary_{chat_id}.pdf"
-    
-    # 💡 억지로 내용을 꾸겨넣지 않고, 깔끔하게 읽힌 JSON 원본을 던져줍니다!
-    generate_pdf_report(parsed_json, pdf_path)
-    
-    if not os.path.exists(pdf_path):
-        raise HTTPException(status_code=500, detail="PDF 파일 생성에 실패했습니다.")
-        
+    generate_pdf_report(parsed, pdf_path)
     return FileResponse(pdf_path, media_type="application/pdf", filename="커피챗_상세리포트.pdf")
