@@ -1,4 +1,3 @@
-# routers/stt.py
 """
 Azure Speech STT 연동
 ────────────────────────────────────────────────────────────
@@ -27,10 +26,8 @@ from sqlalchemy.orm import Session
 load_dotenv()
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["STT"])
-
-AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY") 
-AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "koreacentral")
-
+AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
+AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION")
 # Azure SDK는 선택적 import (키가 없는 환경에서도 서버가 뜨도록)
 try:
     import azure.cognitiveservices.speech as speechsdk
@@ -40,7 +37,9 @@ except ImportError:
     SPEECH_AVAILABLE = False
     logger.warning("⚠️  azure-cognitiveservices-speech 미설치. STT 비활성화.")
 
-
+# routers/stt.py 파일의 load_dotenv() 바로 아래에 추가
+print(f"DEBUG: STT KEY={AZURE_SPEECH_KEY}")
+print(f"DEBUG: STT REGION={AZURE_SPEECH_REGION}")
 # ──────────────────────────────────────────────
 # 방별 STT 상태 관리
 # ──────────────────────────────────────────────
@@ -75,14 +74,31 @@ def _make_push_stream_recognizer(room_id: str, speaker_name: str, loop: asyncio.
         subscription=AZURE_SPEECH_KEY,
         region=AZURE_SPEECH_REGION,
     )
+    
     speech_config.speech_recognition_language = "ko-KR"
-    # 중간 결과도 수신
+    
+    # 💡 [1] 문장 부호 및 포맷팅 강제 옵션 (TrueText 알고리즘 적용)
+    # 문맥을 분석해 마침표, 물음표, 띄어쓰기를 더 정교하게 보정합니다.
+    speech_config.set_property(
+        speechsdk.PropertyId.SpeechServiceResponse_PostProcessingOption, "TrueText"
+    )
+
+    # 💡 [2] 비속어 필터링 (품질 유지)
+    # 대화 중 비속어가 섞일 경우 이를 마스킹(***) 처리하여 자막 품질을 깨끗하게 유지합니다.
+    speech_config.set_profanity(speechsdk.ProfanityOption.Masked)
+
+    # 💡 [3] 상세 출력 포맷 설정 (선택 사항)
+    # 기본값은 'Simple'이지만 'Detailed'로 설정하면 내부적으로 ITN(숫자 변환)이 
+    # 완벽하게 적용된 Display Text를 생성하는 데 도움을 줍니다.
+    speech_config.output_format = speechsdk.OutputFormat.Detailed
+
+    # 중간 결과도 수신하기 위한 딜레이 조정
     speech_config.set_property(
         speechsdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "1500"
     )
 
     stream = speechsdk.audio.PushAudioInputStream(
-        speechsdk.audio.AudioStreamFormat.get_wave_format_pcm(16000, 16, 1)
+        speechsdk.audio.AudioStreamFormat(samples_per_second=16000, bits_per_sample=16, channels=1)
     )
     audio_config = speechsdk.audio.AudioConfig(stream=stream)
     recognizer = speechsdk.SpeechRecognizer(
@@ -93,6 +109,7 @@ def _make_push_stream_recognizer(room_id: str, speaker_name: str, loop: asyncio.
     room_state = stt_rooms[room_id]
 
     def on_recognized(evt):
+        logger.info(f"[STT] Azure 원본 응답: {evt.result.reason}, 텍스트: '{evt.result.text}'")
         text = evt.result.text.strip()
         if not text:
             return
@@ -156,19 +173,25 @@ async def stt_endpoint(
         })
 
     try:
-           while True:
+        while True:
             msg = await websocket.receive()
+
+            # 💡 [핵심 추가 포인트] 클라이언트가 연결을 끊으면 즉시 루프 탈출
+            if msg.get("type") == "websocket.disconnect":
+                logger.info(f"[STT] 클라이언트가 웹소켓 연결을 종료했습니다. (Disconnect 감지)")
+                break
+
             if "bytes" in msg and push_stream:
-                # 💡 데이터가 서버로 잘 들어오고 있는지 확인
                 if len(msg["bytes"]) > 0:
-                    logger.info(f"🎤 [STT] 오디오 청크 수신: {len(msg['bytes'])} bytes") 
+                    # 너무 자주 찍히면 성능 저하가 올 수 있으니 디버깅 후엔 주석 처리 추천
+                    # logger.info(f"🎤 [STT] 오디오 청크 수신: {len(msg['bytes'])} bytes") 
                     push_stream.write(msg["bytes"])
 
-                elif "text" in msg:
-                    try:
-                        data = json.loads(msg["text"])
-                    except json.JSONDecodeError:
-                        continue
+            elif "text" in msg:
+                try:
+                    data = json.loads(msg["text"])
+                except json.JSONDecodeError:
+                    continue
 
                 if data.get("type") == "end_session":
                     # ── 세션 종료: STT 결과 DB 저장 ───────────

@@ -18,13 +18,14 @@ import auth
 from models import User, Mentor, Booking, MentorAvailability, ChatSession, get_db, create_tables
 
 # 💡 새로 분리한 기능별 라우터들을 가져옵니다.
-from routers import users, mentors, bookings, ai, notifications, chat, chat_router, webrtc, stt, lim_chat
-
+from routers import users, mentors, bookings, ai, notifications, chat, chat_router, webrtc, stt, lim_chat,general_chat
 # 서버 실행 시 시스템의 .env 환경변수를 로드 및 DB 초기화
+from routers.dashboard_router import router as dashboard_router_obj
 load_dotenv()
 #create_tables()
 
 app = FastAPI()
+app.include_router(general_chat.router)
 app.include_router(webrtc.router)
 # 💡 2. 아래 두 줄을 추가해서 진짜 STT와 LLM 라우터를 서버에 붙여줍니다!
 app.include_router(stt.router)
@@ -121,10 +122,12 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
         print(f" [ 카카오 콜백 에러]: {str(e)}")
         return RedirectResponse(url="http://localhost:5173/login?error=true", status_code=status.HTTP_302_FOUND)
 
-from routers import webrtc, stt, lim_chat
+from routers.dashboard_router import router as dashboard_router_obj
 app.include_router(webrtc.router)
 app.include_router(stt.router)
 app.include_router(lim_chat.router)
+app.include_router(dashboard_router_obj, prefix="/api/dashboard", tags=["Dashboard"])
+
 
 if __name__ == "__main__":
     import uvicorn

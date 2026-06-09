@@ -1,3 +1,4 @@
+import os
 from pydantic import BaseModel
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
@@ -6,6 +7,7 @@ from sqlalchemy.orm import Session
 from models import User, Mentor, Booking, MentorAvailability, Notification, get_db, ChatSession, Review
 from routers.notifications import manager 
 from datetime import datetime, timedelta
+import requests
 # 라우터 생성 (prefix를 지정해두면 아래에서 /api/booking 을 생략할 수 있습니다)
 router = APIRouter(
     prefix="/api/booking",
@@ -19,6 +21,10 @@ class BookingCreateRequest(BaseModel):
     date: date
     time: str
     questions: str
+class PaymentVerifyRequest(BaseModel):
+    paymentId: str
+    orderId: str
+    amount: int
 
 class ReviewCreateRequest(BaseModel):
     booking_id: int
@@ -292,6 +298,47 @@ def get_booking(booking_id: int, db: Session = Depends(get_db)):
         "mentor_name": mentor.name if mentor else "멘토",
         "user_name": mentee_user.name if mentee_user else "멘티"
     }
+@router.post("/payment/verify")
+def verify_payment(data: PaymentVerifyRequest):
+    portone_secret = os.getenv("PORTONE_API_SECRET")
+
+    if not portone_secret:
+        raise HTTPException(status_code=500, detail="포트원 API Secret이 설정되지 않았습니다.")
+
+    res = requests.get(
+        f"https://api.portone.io/payments/{data.paymentId}",
+        headers={
+            "Authorization": f"PortOne {portone_secret}"
+        }
+    )
+
+    print("PortOne status code:", res.status_code)
+    print("PortOne response:", res.text)
+
+    if res.status_code != 200:
+        raise HTTPException(status_code=400, detail=f"포트원 결제 조회 실패: {res.text}")
+
+    payment = res.json()
+
+    if payment.get("status") != "PAID":
+        raise HTTPException(
+            status_code=400,
+            detail=f"결제가 완료되지 않았습니다. 현재 상태: {payment.get('status')}"
+        )
+
+    paid_amount = payment.get("amount", {}).get("total")
+
+    if paid_amount != data.amount:
+        raise HTTPException(
+            status_code=400,
+            detail=f"결제 금액이 일치하지 않습니다. 결제금액: {paid_amount}, 요청금액: {data.amount}"
+        )
+
+    return {
+        "success": True,
+        "paymentId": data.paymentId,
+        "orderId": data.orderId
+    }
 @router.get("/{user_id}")
 def get_bookings(user_id: int, db: Session = Depends(get_db)):
     print(f" [예약 목록 조회] User ID: {user_id}")
@@ -359,6 +406,7 @@ def get_bookings(user_id: int, db: Session = Depends(get_db)):
             "tab_status": tab_status,
             "created_at": str(b.created_at)
         })
+
     
     return result
 
