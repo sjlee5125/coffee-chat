@@ -17,7 +17,9 @@ import os
 from typing import Dict, List
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from routers.pipeline import agent_regex_masking, agent_azure_pii, agent_llm_masking, agent_llm_summary
+
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -174,3 +176,37 @@ async def llm_assistant(
         logger.error(f"[LLM] 예외 room={room_id} uid={user_id}: {e}")
     finally:
         logger.info(f"[LLM] 연결 해제 room={room_id} uid={user_id}")
+
+# ==========================================
+# 🚀 프론트에서 [종료] 버튼 누를 때 실행되는 AI 요약본 생성 API
+# ==========================================
+@router.post("/{chat_id}/generate-summary")
+async def generate_summary(chat_id: int):
+    print(f"🚀 [{chat_id}번 방] 종료 버튼 클릭 감지! 요약본 생성 파이프라인 시작...")
+
+    # 1. 테스트용 가짜 대화 데이터
+    raw_text = """
+    Host: 안녕하세요 이다은 님, 한국대학교 졸업하시고 스타브릿지 엔터테인먼트에 입사하셨다고 들었어요. 연락처는 010-1234-5678 맞으시죠?
+    Guest: 네 맞습니다. 제 개인 메일 daeun.lee@gmail.com 로도 자료 부탁드릴게요. 연봉 8천만 원 받기로 했습니다.
+    """
+
+    try:
+        from routers.pipeline import agent_regex_masking, agent_azure_pii, agent_llm_masking, agent_llm_summary
+        import json
+        
+        # 2. 초고속 보안 필터링 & 요약 파이프라인 가동!
+        step0_text = agent_regex_masking(raw_text)
+        step1_text = agent_azure_pii(step0_text)
+        step2_text = agent_llm_masking(step1_text)
+        final_json_str = agent_llm_summary(step2_text)
+
+        parsed_json = json.loads(final_json_str)
+
+        print(f"✅ [{chat_id}번 방] 요약본 생성 완료!")
+        
+        return {"message": "요약본 생성 성공", "data": parsed_json}
+
+    except Exception as e:
+        print(f"🚨 파이프라인 에러 발생: {e}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=f"요약본 생성 중 서버 에러: {str(e)}")
