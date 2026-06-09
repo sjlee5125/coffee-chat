@@ -157,7 +157,7 @@ class Review(Base):
     user_id = Column(Integer, nullable=False)    
     rating = Column(Integer, nullable=False)      
     # 💡 아래 한 줄을 추가하세요! (글을 안 남기는 사람도 있으니 nullable=True)
-    content = Column(Text, nullable=True) 
+    review = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 def create_tables():
     """안전하게 신규 스케줄/알림 스키마 동기화 테이블 생성"""
