@@ -63,7 +63,7 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
     rebooking_rate = round((rebooking_users / total_users * 100), 1) if total_users else 0.0
 
     upcoming_rows = (
-        db.query(Booking, User)
+        db.query(Booking.id, Booking.booking_date, Booking.booking_time, Booking.status, User.name)
         .join(User, User.id == Booking.user_id)
         .filter(
             Booking.mentor_id == mentor.id,
@@ -76,16 +76,18 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
     )
     upcoming_chats = [
         {
-            "id": b.id,
-            "mentee_name": u.name,
-            "scheduled_time": f"{b.booking_date} {b.booking_time}",
-            "status": "예정",
+            "id": row.id,
+            "mentee_name": row.name,
+            "scheduled_time": f"{row.booking_date} {row.booking_time}",
+            "status": row.status,
         }
-        for b, u in upcoming_rows
+        for row in upcoming_rows
     ]
 
+    # 💡 [핵심 수정] Review 전체를 가져오지 않고, 필요한 컬럼만 콕 집어서 가져옴 (content 회피)
     review_rows = (
-        db.query(Review, User)
+        db.query(User.name, Review.rating, Review.created_at)
+        .select_from(Review)
         .join(User, User.id == Review.user_id)
         .filter(Review.mentor_id == mentor.id)
         .order_by(Review.created_at.desc())
@@ -93,15 +95,14 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
         .all()
     )
     
-    # 💡 [핵심 수정 부분] r.content 등 없는 컬럼 호출을 완벽히 제거
     recent_reviews = [
         {
-            "mentee_name": u.name,
-            "rating": r.rating,
-            "content": "", # 내용이 없으므로 빈 문자열 처리
-            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "mentee_name": row.name,
+            "rating": row.rating,
+            "content": "", # 내용 없음
+            "created_at": row.created_at.isoformat() if row.created_at else None,
         }
-        for r, u in review_rows
+        for row in review_rows
     ]
 
     return {
@@ -143,7 +144,7 @@ def mentee_dashboard(user_id: int, db: Session = Depends(get_db)):
     learning_hours = round(total_seconds / 3600, 1)
 
     upcoming_rows = (
-        db.query(Booking, Mentor)
+        db.query(Booking.id, Booking.booking_date, Booking.booking_time, Booking.status, Mentor.name)
         .join(Mentor, Mentor.id == Booking.mentor_id)
         .filter(
             Booking.user_id == user_id,
@@ -156,15 +157,15 @@ def mentee_dashboard(user_id: int, db: Session = Depends(get_db)):
     )
     upcoming_bookings = [
         {
-            "id": b.id,
-            "mentor_name": m.name,
-            "scheduled_time": f"{b.booking_date} {b.booking_time}",
-            "status": "예정",
+            "id": row.id,
+            "mentor_name": row.name,
+            "scheduled_time": f"{row.booking_date} {row.booking_time}",
+            "status": row.status,
         }
-        for b, m in upcoming_rows
+        for row in upcoming_rows
     ]
 
-    # 💡 [핵심 수정 부분] SQLAlchemy 매핑 에러 방지를 위해 필요한 컬럼만 명시적으로 조회
+    # 💡 [핵심 수정] 멘티 대시보드에서도 필요한 컬럼만 가져옴
     history_rows = (
         db.query(Booking.booking_date, Mentor.id, Mentor.name, Mentor.mentoring_topics, Review.rating)
         .select_from(Booking)
