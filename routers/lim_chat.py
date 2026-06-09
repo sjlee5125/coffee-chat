@@ -17,13 +17,26 @@ AZURE_API_VERSION = os.getenv("AZURE_API_VERSION", "2024-02-15-preview")
 
 try:
     from openai import AzureOpenAI
-    llm_client = AzureOpenAI(
-        api_key=AZURE_OPENAI_KEY,
-        api_version=AZURE_API_VERSION,
-        azure_endpoint=AZURE_OPENAI_ENDPOINT,
-    ) if all([AZURE_OPENAI_KEY, AZURE_OPENAI_ENDPOINT, AZURE_DEPLOYMENT_NAME]) else None
-except Exception:
+    
+    # 💡 디버깅용: 설정값 잘 불러왔는지 터미널에 출력
+    logger.info(f"LLM KEY 존재 여부: {bool(AZURE_OPENAI_KEY)}")
+    logger.info(f"LLM ENDPOINT: {AZURE_OPENAI_ENDPOINT}")
+    logger.info(f"LLM DEPLOYMENT: {AZURE_DEPLOYMENT_NAME}")
+    
+    if all([AZURE_OPENAI_KEY, AZURE_OPENAI_ENDPOINT, AZURE_DEPLOYMENT_NAME]):
+        llm_client = AzureOpenAI(
+            api_key=AZURE_OPENAI_KEY,
+            api_version=AZURE_API_VERSION,
+            azure_endpoint=AZURE_OPENAI_ENDPOINT,
+        )
+        logger.info("✅ Azure OpenAI 클라이언트 초기화 성공!")
+    else:
+        llm_client = None
+        logger.warning("⚠️ Azure OpenAI 환경변수가 누락되어 LLM이 비활성화됩니다.")
+        
+except Exception as e:
     llm_client = None
+    logger.error(f"🚨 Azure OpenAI 초기화 중 에러 발생 (패키지 설치 확인): {e}")
 
 # 방별 대화 히스토리 (LLM 멀티턴용)
 llm_histories: Dict[str, List[dict]] = {}
