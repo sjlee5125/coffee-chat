@@ -6,7 +6,7 @@ FastAPI 라우터 — 멘토/멘티 대시보드 API
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from datetime import date
+from datetime import date, datetime
 
 from database import get_db
 from models import User, Mentor, Booking, ChatSession, Review
@@ -62,13 +62,18 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
     )
     rebooking_rate = round((rebooking_users / total_users * 100), 1) if total_users else 0.0
 
+    # 💡 [수정됨] 멘토 대시보드: 오늘 지나간 시간을 걸러내는 필터 추가
+    now_dt = datetime.now()
+    current_time_str = now_dt.strftime("%H:%M:%S")
+
     upcoming_rows = (
         db.query(Booking.id, Booking.booking_date, Booking.booking_time, Booking.status, User.name)
         .join(User, User.id == Booking.user_id)
         .filter(
             Booking.mentor_id == mentor.id,
-            Booking.booking_date >= today,
             Booking.status == "PAID",
+            (Booking.booking_date > today) | 
+            ((Booking.booking_date == today) & (Booking.booking_time >= current_time_str))
         )
         .order_by(Booking.booking_date, Booking.booking_time)
         .limit(10)
@@ -84,7 +89,6 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
         for row in upcoming_rows
     ]
 
-    # 💡 [핵심 수정] Review 전체를 가져오지 않고, 필요한 컬럼만 콕 집어서 가져옴 (content 회피)
     review_rows = (
         db.query(User.name, Review.rating, Review.created_at)
         .select_from(Review)
@@ -142,14 +146,19 @@ def mentee_dashboard(user_id: int, db: Session = Depends(get_db)):
         .scalar() or 0
     )
     learning_hours = round(total_seconds / 3600, 1)
-
+    
+    # 💡 [수정됨] 멘티 대시보드: Mentor 정보 조인 및 user_id 기준 필터링으로 정상화
+    now_dt = datetime.now()
+    current_time_str = now_dt.strftime("%H:%M:%S")
+    
     upcoming_rows = (
         db.query(Booking.id, Booking.booking_date, Booking.booking_time, Booking.status, Mentor.name)
-        .join(Mentor, Mentor.id == Booking.mentor_id)
+        .join(Mentor, Mentor.id == Booking.mentor_id) # User가 아니라 Mentor와 조인
         .filter(
-            Booking.user_id == user_id,
-            Booking.booking_date >= today,
+            Booking.user_id == user_id, # mentor.id가 아니라 user_id로 조회!
             Booking.status == "PAID",
+            (Booking.booking_date > today) | 
+            ((Booking.booking_date == today) & (Booking.booking_time >= current_time_str))
         )
         .order_by(Booking.booking_date, Booking.booking_time)
         .limit(10)
@@ -165,7 +174,6 @@ def mentee_dashboard(user_id: int, db: Session = Depends(get_db)):
         for row in upcoming_rows
     ]
 
-    # 💡 [핵심 수정] 멘티 대시보드에서도 필요한 컬럼만 가져옴
     history_rows = (
         db.query(Booking.booking_date, Mentor.id, Mentor.name, Mentor.mentoring_topics, Review.rating)
         .select_from(Booking)
