@@ -417,7 +417,12 @@ def get_bookings(user_id: int, db: Session = Depends(get_db)):
 
 @router.post("/review/create")
 def create_review(request: ReviewCreateRequest, db: Session = Depends(get_db)):
-    print(f" [리뷰 생성] booking_id={request.booking_id}, rating={request.rating}")
+    # 💡 [추가] 이미 리뷰가 있는지 검사하여 2차 방어막 형성
+    existing_review = db.query(Review).filter(Review.booking_id == request.booking_id).first()
+    if existing_review:
+        raise HTTPException(status_code=400, detail="이미 작성된 리뷰가 있습니다.")
+
+    print(f" [리뷰 생성] booking_id={request.booking_id}, rating={request.rating}, mentor_id={request.mentor_id}")
 
     # 리뷰 저장
     review = Review(
