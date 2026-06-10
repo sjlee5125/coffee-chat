@@ -327,9 +327,8 @@ def verify_payment(data: PaymentVerifyRequest):
 def get_bookings(user_id: int, db: Session = Depends(get_db)):
     mentor = db.query(Mentor).filter((Mentor.user_id == user_id) | (Mentor.id == user_id)).first()
     mentor_id = mentor.id if mentor else -1
-
     bookings = db.query(Booking).filter(
-        (Booking.status == "CONFIRMED"),
+        Booking.status == "CONFIRMED", # PAID를 제외하고 CONFIRMED만 가져옴
         ((Booking.user_id == user_id) | (Booking.mentor_id == mentor_id) | (Booking.mentor_id == user_id))
     ).order_by(Booking.booking_date.desc()).all()
     
