@@ -198,17 +198,22 @@ async def reject_booking(booking_id: int, db: Session = Depends(get_db)):
     
     return {"message": "커피챗 예약이 거절되었습니다."}
 
-@router.get("/mentor/{mentor_id}")
-def get_mentor_bookings(mentor_id: int, db: Session = Depends(get_db)):
-    mentor = db.query(Mentor).filter((Mentor.id == mentor_id) | (Mentor.user_id == mentor_id)).first()
+@router.get("/mentor/{user_id}")
+def get_mentor_bookings(user_id: int, db: Session = Depends(get_db)):
+    """
+    멘토 대시보드 (신청받은 내역)
+    프론트에서 로그인한 유저의 회원 번호를 보내므로, 무조건 Mentor.user_id로 찾아야 합니다!
+    """
+    # 💡 1. 엉뚱한 사람 찾기 방지! (무조건 user_id로만 검색)
+    mentor = db.query(Mentor).filter(Mentor.user_id == user_id).first()
     
     if not mentor:
         return []
 
+    # 💡 2. PAID 필터 삭제! (이제 대기, 확정, 거절 내역 모두 뜹니다)
     bookings = db.query(Booking).filter(
-        ((Booking.mentor_id == mentor.id) | (Booking.mentor_id == mentor.user_id)),
-        Booking.status == "PAID"
-    ).all()
+        Booking.mentor_id == mentor.id
+    ).order_by(Booking.created_at.desc()).all()
 
     result = []
     for b in bookings:
@@ -224,7 +229,7 @@ def get_mentor_bookings(mentor_id: int, db: Session = Depends(get_db)):
             "candidate_times": f"{b.booking_date} {b.booking_time}",
             "questions": b.questions,
             "status": b.status
-        }) # 💡 [수정됨] 들여쓰기 에러 해결
+        })
     return result
 
 @router.get("/mentee/{user_id}")
