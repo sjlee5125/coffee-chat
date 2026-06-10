@@ -354,7 +354,7 @@ def get_bookings(user_id: int, db: Session = Depends(get_db)):
         ((Booking.user_id == user_id) | (Booking.mentor_id == mentor_id) | (Booking.mentor_id == user_id))
     ).order_by(Booking.booking_date.asc()).all()
 
-    now = datetime.now()
+    now = datetime.utcnow() + timedelta(hours=9)
     result = []
 
     for b in bookings:
