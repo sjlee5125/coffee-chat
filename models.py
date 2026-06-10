@@ -7,7 +7,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker,relationship
-from sqlalchemy import Column, Integer, DateTime, UniqueConstraint, func
+from sqlalchemy import Column, Integer, String,DateTime, UniqueConstraint, Text
+from sqlalchemy.sql import func
 from database import Base
 
 
@@ -144,6 +145,7 @@ class SavedMentor(Base):
     user_id    = Column(Integer, nullable=False, index=True)   # 찜한 사람 (users.id)
     mentor_id  = Column(Integer, nullable=False, index=True)   # 찜 대상  (mentors.id)
     created_at = Column(DateTime, server_default=func.now())
+    
 
 class CoffeeChatReport(Base):
     """커피챗 종료 후 생성되는 AI 요약 리포트 리포지토리"""
@@ -171,7 +173,18 @@ class CoffeeChatReport(Base):
     masking_map = Column(JSON, nullable=True)
 
 # ─── 3. DB 헬퍼 및 제너레이터 ───
-
+class Review(Base):
+    __tablename__ = "reviews"
+    __table_args__ = {'schema': 'public'}
+    
+    id = Column(Integer, primary_key=True, index=True)
+    booking_id = Column(Integer, nullable=False) 
+    mentor_id = Column(Integer, nullable=False)  
+    user_id = Column(Integer, nullable=False)    
+    rating = Column(Integer, nullable=False)      
+    # 💡 아래 한 줄을 추가하세요! (글을 안 남기는 사람도 있으니 nullable=True)
+    review = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
 def create_tables():
     """안전하게 신규 스케줄/알림 스키마 동기화 테이블 생성"""
     Base.metadata.create_all(bind=engine)
@@ -190,5 +203,5 @@ if __name__ == "__main__":
     create_tables()
     print("테이블 생성 및 동기화 작업 완료!")
 
-# 깃 강제 업데이트용 주석
+
 

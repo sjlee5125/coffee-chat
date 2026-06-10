@@ -13,14 +13,11 @@ from dotenv import load_dotenv
 from openai import AzureOpenAI
 # ... 앞부분 생략 ...
 from auth import router
-
-import auth
 from models import User, Mentor, Booking, MentorAvailability, ChatSession, get_db, create_tables
-
-# 💡 새로 분리한 기능별 라우터들을 가져옵니다.
-from routers import users, mentors, bookings, ai, notifications, chat, chat_router, webrtc, stt, lim_chat,general_chat
-
+import auth
+from routers import users, mentors, bookings, ai, notifications, chat, chat_router, webrtc, stt, lim_chat, pipeline, general_chat
 # 서버 실행 시 시스템의 .env 환경변수를 로드 및 DB 초기화
+from routers.dashboard_router import router as dashboard_router_obj
 load_dotenv()
 #create_tables()
 
@@ -56,6 +53,7 @@ app.include_router(ai.router)
 app.include_router(notifications.router)
 app.include_router(chat.router)
 app.include_router(chat_router.router) # 👈 💡 서버가 우리 라우터를 인식하게끔 이 한 줄을 추가합니다!
+app.include_router(pipeline.router)
 
 @app.get("/")
 def root():
@@ -122,15 +120,11 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
         print(f" [ 카카오 콜백 에러]: {str(e)}")
         return RedirectResponse(url="http://localhost:5173/login?error=true", status_code=status.HTTP_302_FOUND)
 
-from routers import webrtc, stt, lim_chat
+from routers.dashboard_router import router as dashboard_router_obj
 app.include_router(webrtc.router)
 app.include_router(stt.router)
 app.include_router(lim_chat.router)
-
-from dashboard_router import router as dashboard_router
-app.include_router(dashboard_router)
-
-
+app.include_router(dashboard_router_obj)
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

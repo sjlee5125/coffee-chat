@@ -185,7 +185,7 @@ def register_mentor(user_id: int, request: MentorRegisterRequest, db: Session = 
 
     db.commit()
     return {"message": "멘토 프로필 독립 등록 완료"}
-
+"""
 @router.get("/api/mentor/dashboard/{user_id}")
 def get_mentor_dashboard_data(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
@@ -225,28 +225,29 @@ def get_mentor_dashboard_data(user_id: int, db: Session = Depends(get_db)):
         "stats": stats_data,
         "upcoming_chats": upcoming_chats,
     }
-
+"""
 @router.get("/api/mentor/availability/{mentor_id}")
 def get_mentor_availability(mentor_id: int, db: Session = Depends(get_db)):
-    mentor = db.query(Mentor).filter((Mentor.id == mentor_id) | (Mentor.user_id == mentor_id)).first()
+    # 💡 [핵심 수정 1] 엉뚱한 사람을 잡게 만드는 OR 조건 완전 삭제!
+    mentor = db.query(Mentor).filter(Mentor.id == mentor_id).first()
     if not mentor:
         return {} # 404 에러 튕김 방지
 
     today = date.today()
     
-    # 💡 과거 일정 자동 청소 (Lazy Cleanup)
+    # 💡 과거 일정 자동 청소 (Lazy Cleanup) - 여기서도 OR 조건 삭제
     db.query(MentorAvailability).filter(
-        (MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id),
+        MentorAvailability.mentor_id == mentor.id,
         MentorAvailability.date < today
     ).delete()
     db.commit()
 
     availability_rows = db.query(MentorAvailability).filter(
-        (MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id)
+        MentorAvailability.mentor_id == mentor.id
     ).all()
 
     booking_rows = db.query(Booking).filter(
-        (Booking.mentor_id == mentor.id) | (Booking.mentor_id == mentor.user_id),
+        Booking.mentor_id == mentor.id,
         Booking.status == "PAID"
     ).all()
 
@@ -265,23 +266,18 @@ def get_mentor_availability(mentor_id: int, db: Session = Depends(get_db)):
 
 @router.post("/api/mentor/availability/bulk")
 def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Depends(get_db)):
-    mentor = db.query(Mentor).filter((Mentor.id == request.mentor_id) | (Mentor.user_id == request.mentor_id)).first()
+    # 💡 [핵심 수정 2] 저장할 때도 엉뚱한 사람 찾지 않도록 OR 조건 삭제!
+    mentor = db.query(Mentor).filter(Mentor.id == request.mentor_id).first()
     
-    # 💡 멘토 프로필이 없다면 즉시 생성
     if not mentor:
-        user = db.query(User).filter(User.id == request.mentor_id).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="회원 정보가 없습니다.")
-        mentor = Mentor(user_id=request.mentor_id, name=user.name, job_title="직무 미정")
-        db.add(mentor)
-        db.commit()
-        db.refresh(mentor)
+        raise HTTPException(status_code=404, detail="멘토 정보가 없습니다.")
 
     real_mentor_id = mentor.id
 
     for date_str, times in request.schedules.items():
+        # 💡 여기서도 OR 조건 삭제
         db.query(MentorAvailability).filter(
-            (MentorAvailability.mentor_id == mentor.id) | (MentorAvailability.mentor_id == mentor.user_id),
+            MentorAvailability.mentor_id == real_mentor_id,
             MentorAvailability.date == date_str,
         ).delete()
 
