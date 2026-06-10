@@ -14,11 +14,22 @@ API_VERSION = "2024-12-01-preview"
 DEPLOYMENT_NAME = "ai_advice" 
 
 # 3. 위에서 만든 AZURE_API_KEY가 여기에 아주 자연스럽게 들어갑니다.
-client = AzureOpenAI(
-     api_key=AZURE_API_KEY,
-     api_version=API_VERSION,
-     azure_endpoint=AZURE_ENDPOINT
- )
+# 기존 ❌ push할때 수정필요
+# client = AzureOpenAI(
+#     api_key=AZURE_API_KEY,
+#     api_version=API_VERSION,
+#     azure_endpoint=AZURE_ENDPOINT
+# )
+# 수정 ✅
+try:
+    client = AzureOpenAI(
+        api_key=AZURE_API_KEY,
+        api_version=API_VERSION,
+        azure_endpoint=AZURE_ENDPOINT
+    )
+except Exception as e:
+    print(f"⚠️ Azure OpenAI 초기화 실패: {e}")
+    client = None
 
 def generate_wrapup_report(host_text: str, guest_text: str) -> str:
     system_prompt = """
