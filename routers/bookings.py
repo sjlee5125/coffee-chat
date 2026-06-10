@@ -339,8 +339,75 @@ def verify_payment(data: PaymentVerifyRequest):
 # ==========================================================
 # 8. CoffeeChats.jsx 전용 — CONFIRMED 예약 + tab_status 계산
 # ==========================================================
+# routers/bookings.py 파일의 해당 함수를 교체하세요
 @router.get("/{user_id}")
+def get_bookings(user_id: int, db: Session = Depends(get_db)):
+    print(f" [CoffeeChats 조회] User ID: {user_id}")
 
+    # 1. 내 멘토 정보 안전하게 조회
+    mentor = db.query(Mentor).filter(Mentor.user_id == user_id).first()
+    mentor_id = mentor.id if mentor else -1
+
+    # 💡 [핵심 수정] 승재 님 말씀대로 보낸 신청(user_id)과 받은 신청(mentor_id 또는 user_id 직접 매칭) 조건을 가장 확실하게 묶음!
+    bookings = db.query(Booking).filter(
+        Booking.status == "CONFIRMED",
+        ((Booking.user_id == user_id) | (Booking.mentor_id == mentor_id) | (Booking.mentor_id == user_id))
+    ).order_by(Booking.booking_date.asc()).all()
+
+    now = datetime.now()
+    result = []
+
+    for b in bookings:
+        booking_datetime = _parse_booking_datetime(b.booking_date, b.booking_time)
+        diff_min = (booking_datetime - now).total_seconds() / 60
+
+        # ── tab_status 계산 ──────────────────────────────
+        chat_session = db.query(ChatSession).filter(ChatSession.booking_id == b.id).first()
+
+        # 💡 [버그 수정] 아무리 세션이 완료 상태여도, 아직 예약 시간이 도래하지 않은 미래 시간(diff_min > 5)이면 무조건 'upcoming'으로 보호!
+        if diff_min > 5:
+            tab_status = "upcoming"
+        elif chat_session and chat_session.status == "COMPLETED":
+            tab_status = "completed"
+        elif chat_session and chat_session.status == "ONGOING":
+            tab_status = "ongoing"
+        else:
+            # 시간 기준으로 최종 계산
+            if diff_min > 5:
+                tab_status = "upcoming"
+            elif -30 <= diff_min <= 5:
+                tab_status = "ongoing"
+            else:
+                tab_status = "completed"
+
+        print(f" [tab_status] booking_id={b.id} date={b.booking_date} time={b.booking_time} "
+              f"→ {tab_status} (최종 확정된 분기)")
+
+        # ── 상대방 이름 매핑 ──────────────────────────────────
+        if b.user_id == user_id:
+            target_mentor = db.query(Mentor).filter(Mentor.id == b.mentor_id).first()
+            partner_name = target_mentor.name if target_mentor else f"멘토 #{b.mentor_id}"
+        else:
+            target_mentee = db.query(User).filter(User.id == b.user_id).first()
+            partner_name = target_mentee.name if target_mentee else "크루(예약자)"
+
+        has_review = db.query(Review).filter(Review.booking_id == b.id).first() is not None
+
+        result.append({
+            "id": b.id,
+            "mentor_id": b.mentor_id,
+            "mentor_name": partner_name,
+            "user_id": b.user_id,
+            "booking_date": str(b.booking_date),
+            "booking_time": str(b.booking_time)[:5],
+            "questions": b.questions,
+            "status": b.status,
+            "tab_status": tab_status,
+            "has_review": has_review,
+            "created_at": str(b.created_at)
+        })
+
+    return result
 
 # ==========================================================
 # 9. 리뷰 작성
