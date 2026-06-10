@@ -234,27 +234,35 @@ def get_mentor_bookings(mentor_id: int, db: Session = Depends(get_db)):
         mentee = db.query(User).filter(User.id == b.user_id).first()
         result.append({
             "booking_id": b.id,
-            "mentee_name": mentee.name if mentee else "익명 크루",
+            "partner_name": mentee.name if mentee else "익명 크루",   # ← 프론트가 읽는 키
+            "partner_image": mentee.profile_image if mentee and hasattr(mentee, 'profile_image') else None,
+            "mentee_name": mentee.name if mentee else "익명 크루",    # ← 기존 키 유지 (혹시 다른 곳에서 쓸 수 있으니)
             "mentee_image": mentee.profile_image if mentee and hasattr(mentee, 'profile_image') else None,
             "booking_date": str(b.booking_date) if b.booking_date else "", 
             "booking_time": str(b.booking_time) if b.booking_time else "",
             "candidate_times": f"{b.booking_date} {b.booking_time}",
             "questions": b.questions,
             "status": b.status
-        })
+})
     return result
 
 @router.get("/mentee/{user_id}")
 def get_mentee_bookings(user_id: int, db: Session = Depends(get_db)):
-    bookings = db.query(Booking).filter(Booking.user_id == user_id).all()
+    bookings = db.query(Booking).filter(Booking.user_id == user_id)\
+    .order_by(Booking.created_at.desc()).all()
 
     result = []
     for b in bookings:
         mentor = db.query(Mentor).filter(Mentor.id == b.mentor_id).first()
         mentor_user = db.query(User).filter(User.id == mentor.user_id).first() if mentor else None
         
+        # 💡 [추가] 이 예약(booking_id)에 대한 리뷰가 이미 존재하는지 확인
+        has_review = db.query(Review).filter(Review.booking_id == b.id).first() is not None
+        
         result.append({
             "booking_id": b.id,
+            "mentor_id": b.mentor_id,  # 💡 [추가] 프론트엔드에서 리뷰 작성 시 사용할 수 있도록 mentor_id 전달
+            "has_review": has_review,  # 💡 [추가] 리뷰 작성 완료 여부 전달
             "partner_name": mentor.name if mentor else "알 수 없는 멘토",
             "partner_image": mentor_user.profile_image if mentor_user and hasattr(mentor_user, 'profile_image') else None,
             "booking_date": str(b.booking_date) if b.booking_date else "", 
@@ -265,7 +273,7 @@ def get_mentee_bookings(user_id: int, db: Session = Depends(get_db)):
         })
     if not bookings:
         return []   
-    return result 
+    return result
 
 @router.get("/detail/{booking_id}")  # <-- /api/booking/detail/78
 def get_booking(booking_id: int, db: Session = Depends(get_db)):
@@ -412,7 +420,12 @@ def get_bookings(user_id: int, db: Session = Depends(get_db)):
 
 @router.post("/review/create")
 def create_review(request: ReviewCreateRequest, db: Session = Depends(get_db)):
-    print(f" [리뷰 생성] booking_id={request.booking_id}, rating={request.rating}")
+    # 💡 [추가] 이미 리뷰가 있는지 검사하여 2차 방어막 형성
+    existing_review = db.query(Review).filter(Review.booking_id == request.booking_id).first()
+    if existing_review:
+        raise HTTPException(status_code=400, detail="이미 작성된 리뷰가 있습니다.")
+
+    print(f" [리뷰 생성] booking_id={request.booking_id}, rating={request.rating}, mentor_id={request.mentor_id}")
 
     # 리뷰 저장
     review = Review(

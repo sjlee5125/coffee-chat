@@ -1,83 +1,32 @@
 """
 dashboard_router.py
 FastAPI 라우터 — 멘토/멘티 대시보드 API
-사용법: main.py에 app.include_router(dashboard_router.router) 추가
 """
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func, case
-from datetime import datetime, date
-from typing import Optional
+from sqlalchemy import func
+from datetime import date, datetime
 
-# 기존 프로젝트의 DB/모델 import 경로에 맞게 수정하세요
-from database import get_db, SessionLocal
+from database import get_db
 from models import User, Mentor, Booking, ChatSession, Review
-
-# ── SavedMentor 모델 (database.py / models.py에 추가하세요) ──────────
-# 아래 import 대신 직접 models.py에 붙여넣기 해도 됩니다
-try:
-    from models import SavedMentor
-except ImportError:
-    # 모델이 아직 없으면 여기서 임시 정의 (models.py에 정식 추가 권장)
-    from sqlalchemy import UniqueConstraint
-    from database import Base
-    from sqlalchemy import Column, Integer, DateTime
-    from sqlalchemy import func as sqlfunc
-
-    class SavedMentor(Base):
-        __tablename__ = "saved_mentors"
-        __table_args__ = (
-            UniqueConstraint('user_id', 'mentor_id', name='uq_saved_mentor'),
-            {'schema': 'public'}
-        )
-        id        = Column(Integer, primary_key=True, index=True)
-        user_id   = Column(Integer, nullable=False, index=True)   # 찜한 멘티 user_id
-        mentor_id = Column(Integer, nullable=False, index=True)   # 찜 당한 mentor.id
-        created_at = Column(DateTime, server_default=sqlfunc.now())
-
-    # 테이블 자동 생성 (최초 1회)
-    from database import engine
-    Base.metadata.create_all(bind=engine)
-
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
 
-
 # ════════════════════════════════════════════════════════════════
-#  멘토 대시보드  GET /api/mentor/dashboard/{user_id}
+#  멘토 대시보드
 # ════════════════════════════════════════════════════════════════
 @router.get("/mentor/dashboard/{user_id}")
 def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
-    """
-    해당 user_id가 멘토로 등록된 경우에만 데이터를 반환합니다.
-    멘토가 아니면 404를 반환해 프론트가 isMentor=false로 처리하게 합니다.
-    """
-
-    # 1) 멘토 존재 확인
     mentor = db.query(Mentor).filter(Mentor.user_id == user_id).first()
     if not mentor:
         raise HTTPException(status_code=404, detail="멘토 등록 정보가 없습니다.")
 
     user = db.query(User).filter(User.id == user_id).first()
-
     today = date.today()
     this_month_start = today.replace(day=1)
 
-    # ── 통계 계산 ─────────────────────────────────────────────────
-
-    # 이번 달 완료된 예약 수익
-    # Booking에 price 컬럼이 없으므로 Mentor.price 파싱 또는 건당 고정값 사용
-    # 여기선 건당 mentor.price를 숫자로 파싱 시도, 실패 시 0
-    def parse_price(price_str: Optional[str]) -> int:
-        if not price_str:
-            return 0
-        import re
-        nums = re.sub(r"[^\d]", "", price_str)
-        return int(nums) if nums else 0
-
-    price_per_session = parse_price(mentor.price)
-
+    FIXED_PRICE = 15000
     monthly_bookings_count = (
         db.query(func.count(Booking.id))
         .filter(
@@ -87,32 +36,25 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
         )
         .scalar() or 0
     )
-    monthly_earnings = monthly_bookings_count * price_per_session
+    monthly_earnings = monthly_bookings_count * FIXED_PRICE
 
-    # 평균 평점
-    avg_rating_row = (
-        db.query(func.avg(Review.rating))
-        .filter(Review.mentor_id == mentor.id)
-        .scalar()
-    )
+    avg_rating_row = db.query(func.avg(Review.rating)).filter(Review.mentor_id == mentor.id).scalar()
     average_rating = round(float(avg_rating_row), 1) if avg_rating_row else 0.0
 
-    # 총 멘토링 시간 (chat_sessions duration_sec 합산)
-    total_sec = (
-        db.query(func.sum(ChatSession.duration_sec))
+    total_seconds = (
+        db.query(
+            func.sum(
+                func.extract('epoch', ChatSession.ended_at) - func.extract('epoch', ChatSession.started_at)
+            )
+        )
         .filter(ChatSession.mentor_id == mentor.id)
         .scalar() or 0
     )
-    mentoring_hours = round(total_sec / 3600, 1)
+    mentoring_hours = round(total_seconds / 3600, 1)
 
-    # 재예약률: 동일 user_id가 2회 이상 예약한 비율
-    total_users = (
-        db.query(func.count(func.distinct(Booking.user_id)))
-        .filter(Booking.mentor_id == mentor.id)
-        .scalar() or 0
-    )
+    total_users = db.query(func.count(func.distinct(Booking.user_id))).filter(Booking.mentor_id == mentor.id).scalar() or 0
     rebooking_users = (
-        db.query(func.count(Booking.user_id))
+        db.query(Booking.user_id)
         .filter(Booking.mentor_id == mentor.id)
         .group_by(Booking.user_id)
         .having(func.count(Booking.id) >= 2)
@@ -120,14 +62,18 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
     )
     rebooking_rate = round((rebooking_users / total_users * 100), 1) if total_users else 0.0
 
-    # ── 예정된 멘토링 ──────────────────────────────────────────────
+    # 💡 [수정됨] 멘토 대시보드: 오늘 지나간 시간을 걸러내는 필터 추가
+    now_dt = datetime.now()
+    current_time_str = now_dt.strftime("%H:%M:%S")
+
     upcoming_rows = (
-        db.query(Booking, User)
+        db.query(Booking.id, Booking.booking_date, Booking.booking_time, Booking.status, User.name)
         .join(User, User.id == Booking.user_id)
         .filter(
             Booking.mentor_id == mentor.id,
-            Booking.booking_date >= today,
             Booking.status == "PAID",
+            (Booking.booking_date > today) | 
+            ((Booking.booking_date == today) & (Booking.booking_time >= current_time_str))
         )
         .order_by(Booking.booking_date, Booking.booking_time)
         .limit(10)
@@ -135,37 +81,39 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
     )
     upcoming_chats = [
         {
-            "id": b.id,
-            "mentee_name": u.name,
-            "scheduled_time": f"{b.booking_date} {b.booking_time}",
-            "status": "예정",
+            "id": row.id,
+            "mentee_name": row.name,
+            "scheduled_time": f"{row.booking_date} {row.booking_time}",
+            "status": row.status,
         }
-        for b, u in upcoming_rows
+        for row in upcoming_rows
     ]
 
-    # ── 최근 리뷰 ─────────────────────────────────────────────────
     review_rows = (
-        db.query(Review, User)
+        db.query(User.name, Review.rating, Review.created_at)
+        .select_from(Review)
         .join(User, User.id == Review.user_id)
         .filter(Review.mentor_id == mentor.id)
         .order_by(Review.created_at.desc())
         .limit(5)
         .all()
     )
+    
     recent_reviews = [
         {
-            "mentee_name": u.name,
-            "rating": r.rating,
-            "content": r.review,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "mentee_name": row.name,
+            "rating": row.rating,
+            "content": "", # 내용 없음
+            "created_at": row.created_at.isoformat() if row.created_at else None,
         }
-        for r, u in review_rows
+        for row in review_rows
     ]
 
     return {
         "stats": {
             "name": user.name if user else mentor.name,
             "monthly_earnings": monthly_earnings,
+            "monthly_session_count": monthly_bookings_count,
             "average_rating": average_rating,
             "mentoring_hours": mentoring_hours,
             "rebooking_rate": rebooking_rate,
@@ -175,57 +123,39 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
     }
 
 
-# ════════════════════════════════════════════════════════════════
-#  멘티 대시보드  GET /api/mentee/dashboard/{user_id}
-# ════════════════════════════════════════════════════════════════
 @router.get("/mentee/dashboard/{user_id}")
 def mentee_dashboard(user_id: int, db: Session = Depends(get_db)):
-
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="유저를 찾을 수 없습니다.")
 
     today = date.today()
 
-    # ── 통계 계산 ─────────────────────────────────────────────────
+    total_chats = db.query(func.count(Booking.id)).filter(Booking.user_id == user_id, Booking.status == "PAID").scalar() or 0
 
-    # 참여한 커피챗 수 (완료된 예약)
-    total_chats = (
-        db.query(func.count(Booking.id))
-        .filter(Booking.user_id == user_id, Booking.status == "PAID")
-        .scalar() or 0
-    )
-
-    # 총 학습 시간 (chat_sessions 기준)
-    total_sec = (
-        db.query(func.sum(ChatSession.duration_sec))
+    total_seconds = (
+        db.query(
+            func.sum(
+                func.extract('epoch', ChatSession.ended_at) - func.extract('epoch', ChatSession.started_at)
+            )
+        )
         .filter(ChatSession.user_id == user_id)
         .scalar() or 0
     )
-    learning_hours = round(total_sec / 3600, 1)
-
-    # 만난 멘토 수 (중복 제거)
-    mentor_count = (
-        db.query(func.count(func.distinct(Booking.mentor_id)))
-        .filter(Booking.user_id == user_id)
-        .scalar() or 0
-    )
-
-    # 관심(찜) 멘토 수
-    saved_count = (
-        db.query(func.count(SavedMentor.id))
-        .filter(SavedMentor.user_id == user_id)
-        .scalar() or 0
-    )
-
-    # ── 다가오는 예약 ──────────────────────────────────────────────
+    learning_hours = round(total_seconds / 3600, 1)
+    
+    # 💡 [수정됨] 멘티 대시보드: Mentor 정보 조인 및 user_id 기준 필터링으로 정상화
+    now_dt = datetime.now()
+    current_time_str = now_dt.strftime("%H:%M:%S")
+    
     upcoming_rows = (
-        db.query(Booking, Mentor)
-        .join(Mentor, Mentor.id == Booking.mentor_id)
+        db.query(Booking.id, Booking.booking_date, Booking.booking_time, Booking.status, Mentor.name)
+        .join(Mentor, Mentor.id == Booking.mentor_id) # User가 아니라 Mentor와 조인
         .filter(
-            Booking.user_id == user_id,
-            Booking.booking_date >= today,
+            Booking.user_id == user_id, # mentor.id가 아니라 user_id로 조회!
             Booking.status == "PAID",
+            (Booking.booking_date > today) | 
+            ((Booking.booking_date == today) & (Booking.booking_time >= current_time_str))
         )
         .order_by(Booking.booking_date, Booking.booking_time)
         .limit(10)
@@ -233,18 +163,17 @@ def mentee_dashboard(user_id: int, db: Session = Depends(get_db)):
     )
     upcoming_bookings = [
         {
-            "id": b.id,
-            "mentor_name": m.name,
-            "scheduled_time": f"{b.booking_date} {b.booking_time}",
-            "status": "예정",
+            "id": row.id,
+            "mentor_name": row.name,
+            "scheduled_time": f"{row.booking_date} {row.booking_time}",
+            "status": row.status,
         }
-        for b, m in upcoming_rows
+        for row in upcoming_rows
     ]
 
-    # ── 최근 만난 멘토 이력 ────────────────────────────────────────
-    # 완료된 예약 기준, 가장 최근 순으로 멘토 중복 제거
     history_rows = (
-        db.query(Booking, Mentor, Review)
+        db.query(Booking.booking_date, Mentor.id, Mentor.name, Mentor.mentoring_topics, Review.rating)
+        .select_from(Booking)
         .join(Mentor, Mentor.id == Booking.mentor_id)
         .outerjoin(
             Review,
@@ -252,7 +181,7 @@ def mentee_dashboard(user_id: int, db: Session = Depends(get_db)):
         )
         .filter(
             Booking.user_id == user_id,
-            Booking.booking_date < today,   # 완료된 것만
+            Booking.booking_date < today,
             Booking.status == "PAID",
         )
         .order_by(Booking.booking_date.desc())
@@ -260,19 +189,18 @@ def mentee_dashboard(user_id: int, db: Session = Depends(get_db)):
         .all()
     )
 
-    # 멘토 중복 제거 (최근 1건만 유지)
     seen_mentor_ids = set()
     mentor_history = []
-    for b, m, r in history_rows:
-        if m.id in seen_mentor_ids:
+    for booking_date, m_id, m_name, m_topics, r_rating in history_rows:
+        if m_id in seen_mentor_ids:
             continue
-        seen_mentor_ids.add(m.id)
+        seen_mentor_ids.add(m_id)
         mentor_history.append({
-            "mentor_id": m.id,
-            "mentor_name": m.name,
-            "topic": m.mentoring_topics.split("\n")[0] if m.mentoring_topics else None,
-            "date": b.booking_date.isoformat() if b.booking_date else None,
-            "my_rating": r.rating if r else None,
+            "mentor_id": m_id,
+            "mentor_name": m_name,
+            "topic": m_topics.split("\n")[0] if m_topics else None,
+            "date": booking_date.isoformat() if booking_date else None,
+            "my_rating": r_rating,
         })
         if len(mentor_history) >= 5:
             break
@@ -282,34 +210,7 @@ def mentee_dashboard(user_id: int, db: Session = Depends(get_db)):
             "name": user.name,
             "total_chats": total_chats,
             "learning_hours": learning_hours,
-            "mentor_count": mentor_count,
-            "saved_mentors": saved_count,
         },
         "upcoming_bookings": upcoming_bookings,
         "mentor_history": mentor_history,
     }
-
-
-# ════════════════════════════════════════════════════════════════
-#  멘토 찜 토글  POST /api/mentee/save-mentor
-# ════════════════════════════════════════════════════════════════
-@router.post("/mentee/save-mentor")
-def toggle_save_mentor(
-    user_id: int,
-    mentor_id: int,
-    db: Session = Depends(get_db),
-):
-    """찜 추가/취소 토글. 반환: { saved: bool }"""
-    existing = (
-        db.query(SavedMentor)
-        .filter(SavedMentor.user_id == user_id, SavedMentor.mentor_id == mentor_id)
-        .first()
-    )
-    if existing:
-        db.delete(existing)
-        db.commit()
-        return {"saved": False}
-    else:
-        db.add(SavedMentor(user_id=user_id, mentor_id=mentor_id))
-        db.commit()
-        return {"saved": True}
