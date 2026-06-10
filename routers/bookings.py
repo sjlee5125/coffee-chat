@@ -3,13 +3,11 @@ from pydantic import BaseModel
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-# bookings.py 상단 수정
 from models import User, Mentor, Booking, MentorAvailability, Notification, get_db, ChatSession, Review
 from routers.notifications import manager 
 from datetime import datetime, timedelta
 import requests
 
-# 라우터 생성
 router = APIRouter(
     prefix="/api/booking",
     tags=["Bookings"]
@@ -34,16 +32,39 @@ class ReviewCreateRequest(BaseModel):
     rating: int
     review: str
 
+
+# ==========================================================
+# 공통 유틸: booking_time 문자열 → datetime 안전 파싱
+# ==========================================================
+def _parse_booking_datetime(booking_date, booking_time) -> datetime:
+    """
+    booking_time이 "15:00", "15:00:00", "3:00 PM" 등 어떤 포맷이어도
+    안전하게 datetime으로 변환합니다.
+    파싱 실패 시 내일 시각을 반환 → upcoming으로 처리됩니다.
+    """
+    try:
+        date_str = str(booking_date).strip()
+        time_str = str(booking_time).strip()
+
+        # HH:MM:SS → HH:MM
+        if len(time_str) > 5 and ':' in time_str:
+            time_str = time_str[:5]
+
+        return datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+    except Exception as e:
+        print(f"[시간 파싱 실패] {booking_date} {booking_time}: {e}")
+        return datetime.now() + timedelta(days=1)  # 파싱 실패 → 내일로 → upcoming
+
+
 # ==========================================================
 # 1. 커피챗 예약 생성
 # ==========================================================
 @router.post("/create")
 async def create_booking(request: BookingCreateRequest, db: Session = Depends(get_db)):
-    """멘티의 커피챗 예약 생성 API"""
     print(f" [예약 생성 요청] mentor_id={request.mentorId}, user_id={request.userId}")
 
     mentor = db.query(Mentor).filter(Mentor.id == request.mentorId).first()
-    if not mentor: 
+    if not mentor:
         raise HTTPException(status_code=404, detail="존재하지 않는 멘토입니다.")
 
     user = db.query(User).filter(User.id == request.userId).first()
@@ -56,7 +77,7 @@ async def create_booking(request: BookingCreateRequest, db: Session = Depends(ge
         Booking.booking_time == request.time,
         Booking.status == "PAID"
     ).first()
-    
+
     if existing:
         raise HTTPException(status_code=400, detail="이미 예약이 완료된 시간대입니다.")
 
@@ -75,16 +96,15 @@ async def create_booking(request: BookingCreateRequest, db: Session = Depends(ge
         MentorAvailability.date == request.date,
         MentorAvailability.time == request.time,
     ).delete()
-    
+
     db.commit()
     db.refresh(booking)
-    print(f" [예약 생성 성공 완결] Booking ID: {booking.id} 매핑 데이터 세팅 완료")
+    print(f" [예약 생성 성공] Booking ID: {booking.id}")
 
     try:
         target_user_id = mentor.user_id
-        
         new_notif = Notification(
-            user_id=target_user_id, 
+            user_id=target_user_id,
             message=f"🎉 {user.name}님으로부터 새로운 커피챗 예약 요청이 도착했습니다!",
             is_read=False
         )
@@ -92,15 +112,13 @@ async def create_booking(request: BookingCreateRequest, db: Session = Depends(ge
         db.commit()
         db.refresh(new_notif)
 
-        notif_data = {
+        await manager.send_personal_message({
             "id": new_notif.id,
             "message": new_notif.message,
             "is_read": False,
             "created_at": new_notif.created_at.isoformat() if new_notif.created_at else None,
             "type": "NEW_BOOKING_REQUEST"
-        }
-        await manager.send_personal_message(notif_data, target_user_id)
-        
+        }, target_user_id)
     except Exception as ws_err:
         print(f"❌ [알림 전송 실패]: {str(ws_err)}")
 
@@ -108,111 +126,109 @@ async def create_booking(request: BookingCreateRequest, db: Session = Depends(ge
 
 
 # ==========================================================
-# 2. 예약 확정 
+# 2. 예약 확정
 # ==========================================================
 @router.post("/confirm/{booking_id}")
 async def confirm_booking(booking_id: int, db: Session = Depends(get_db)):
-    """예약 확정 시 멘티에게 실시간 알림 전송 및 채팅 세션 생성 API"""
-    print(f" [예약 최종 수락 요청] Booking ID: {booking_id}")
-    
+    print(f" [예약 확정 요청] Booking ID: {booking_id}")
+
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="예약 내역을 찾을 수 없습니다.")
-    
+
     booking.status = "CONFIRMED"
-    
+
     existing_session = db.query(ChatSession).filter(ChatSession.booking_id == booking_id).first()
     if not existing_session:
-        new_session = ChatSession(
+        db.add(ChatSession(
             booking_id=booking.id,
             mentor_id=booking.mentor_id,
             user_id=booking.user_id,
             status="READY"
-        )
-        db.add(new_session)
+        ))
 
     db.commit()
-    
+    print(f" [예약 확정 완료] Booking ID: {booking_id}")
+
     try:
         new_notif = Notification(
             user_id=booking.user_id,
-            message=f"🎉 멘토님이 커피챗 예약을 최종 확정했습니다!",
+            message="🎉 멘토님이 커피챗 예약을 최종 확정했습니다!",
             is_read=False
         )
         db.add(new_notif)
         db.commit()
         db.refresh(new_notif)
 
-        notif_data = {
+        await manager.send_personal_message({
             "id": new_notif.id,
             "message": new_notif.message,
             "is_read": False,
             "created_at": new_notif.created_at.isoformat() if new_notif.created_at else None,
             "type": "BOOKING_CONFIRMED",
             "booking_id": booking_id
-        }
-        await manager.send_personal_message(notif_data, booking.user_id)
-        
+        }, booking.user_id)
     except Exception as ws_err:
         print(f"❌ [알림 전송 실패]: {str(ws_err)}")
-    
+
     return {"message": "커피챗 예약이 최종 확정되었습니다."}
 
+
 # ==========================================================
-# 3. 예약 거절 
+# 3. 예약 거절
 # ==========================================================
 @router.post("/reject/{booking_id}")
 async def reject_booking(booking_id: int, db: Session = Depends(get_db)):
-    """예약 거절 시 멘티에게 실시간 알림 전송 API"""
     print(f" [예약 거절 요청] Booking ID: {booking_id}")
-    
+
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="예약 내역을 찾을 수 없습니다.")
-    
+
     booking.status = "REJECTED"
     db.commit()
-    
+    print(f" [예약 거절 완료] Booking ID: {booking_id}")
+
     try:
         new_notif = Notification(
             user_id=booking.user_id,
-            message=f"😢 아쉽게도 멘토님의 일정상 커피챗 예약이 거절되었습니다.",
+            message="😢 아쉽게도 멘토님의 일정상 커피챗 예약이 거절되었습니다.",
             is_read=False
         )
         db.add(new_notif)
         db.commit()
         db.refresh(new_notif)
 
-        notif_data = {
+        await manager.send_personal_message({
             "id": new_notif.id,
             "message": new_notif.message,
             "is_read": False,
             "created_at": new_notif.created_at.isoformat() if new_notif.created_at else None,
             "type": "BOOKING_REJECTED",
             "booking_id": booking_id
-        }
-        await manager.send_personal_message(notif_data, booking.user_id)
-        
+        }, booking.user_id)
     except Exception as ws_err:
         print(f"❌ [알림 전송 실패]: {str(ws_err)}")
-    
+
     return {"message": "커피챗 예약이 거절되었습니다."}
 
+
+# ==========================================================
+# 4. 신청받은 내역 (멘토용) — BookingHistory.jsx 신청받은 탭
+# ==========================================================
 @router.get("/mentor/{user_id}")
 def get_mentor_bookings(user_id: int, db: Session = Depends(get_db)):
     """
-    멘토 대시보드 (신청받은 내역)
-    프론트에서 로그인한 유저의 회원 번호를 보내므로, 무조건 Mentor.user_id로 찾아야 합니다!
+    프론트는 로그인한 유저의 user_id를 보냄 → Mentor.user_id로 검색
+    PAID(대기) 상태만 노출 — 확정/거절된 건 이미 처리됨
     """
-    # 💡 1. 엉뚱한 사람 찾기 방지! (무조건 user_id로만 검색)
     mentor = db.query(Mentor).filter(Mentor.user_id == user_id).first()
-    
     if not mentor:
         return []
 
-    # 💡 2. PAID 필터 삭제! (이제 대기, 확정, 거절 내역 모두 뜹니다)
     bookings = db.query(Booking).filter(
-        Booking.mentor_id == mentor.id
+        Booking.mentor_id == mentor.id,
+        Booking.status == "PAID"   # 수락 대기 중인 것만
     ).order_by(Booking.created_at.desc()).all()
 
     result = []
@@ -224,7 +240,7 @@ def get_mentor_bookings(user_id: int, db: Session = Depends(get_db)):
             "partner_image": mentee.profile_image if mentee and hasattr(mentee, 'profile_image') else None,
             "mentee_name": mentee.name if mentee else "익명 크루",
             "mentee_image": mentee.profile_image if mentee and hasattr(mentee, 'profile_image') else None,
-            "booking_date": str(b.booking_date) if b.booking_date else "", 
+            "booking_date": str(b.booking_date) if b.booking_date else "",
             "booking_time": str(b.booking_time) if b.booking_time else "",
             "candidate_times": f"{b.booking_date} {b.booking_time}",
             "questions": b.questions,
@@ -232,44 +248,50 @@ def get_mentor_bookings(user_id: int, db: Session = Depends(get_db)):
         })
     return result
 
+
+# ==========================================================
+# 5. 내가 신청한 내역 (멘티용) — BookingHistory.jsx 신청한 탭
+# ==========================================================
 @router.get("/mentee/{user_id}")
 def get_mentee_bookings(user_id: int, db: Session = Depends(get_db)):
-    bookings = db.query(Booking).filter(Booking.user_id == user_id)\
-    .order_by(Booking.created_at.desc()).all()
+    bookings = db.query(Booking).filter(Booking.user_id == user_id) \
+        .order_by(Booking.created_at.desc()).all()
 
     result = []
     for b in bookings:
         mentor = db.query(Mentor).filter(Mentor.id == b.mentor_id).first()
         mentor_user = db.query(User).filter(User.id == mentor.user_id).first() if mentor else None
-        
         has_review = db.query(Review).filter(Review.booking_id == b.id).first() is not None
 
-        # 💡 [수정됨] 프론트엔드가 요구하는 키값으로 정확하게 복구! (정의되지 않은 변수 삭제)
         result.append({
-            "booking_id": b.id,  # 프론트가 booking_id로 라우팅합니다.
+            "booking_id": b.id,
             "mentor_id": b.mentor_id,
             "has_review": has_review,
             "partner_name": mentor.name if mentor else "알 수 없는 멘토",
             "partner_image": mentor_user.profile_image if mentor_user and hasattr(mentor_user, 'profile_image') else None,
-            "booking_date": str(b.booking_date) if b.booking_date else "", 
+            "booking_date": str(b.booking_date) if b.booking_date else "",
             "booking_time": str(b.booking_time) if b.booking_time else "",
-            "candidate_times": f"{b.booking_date} {b.booking_time}", 
+            "candidate_times": f"{b.booking_date} {b.booking_time}",
             "questions": b.questions,
             "status": b.status,
             "created_at": str(b.created_at) if b.created_at else ""
         })
-        
+
     return result
 
+
+# ==========================================================
+# 6. 예약 상세 조회
+# ==========================================================
 @router.get("/detail/{booking_id}")
 def get_booking(booking_id: int, db: Session = Depends(get_db)):
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="예약 정보를 찾을 수 없습니다.")
-    
+
     mentor = db.query(Mentor).filter(Mentor.id == booking.mentor_id).first()
     mentee_user = db.query(User).filter(User.id == booking.user_id).first()
-    
+
     return {
         "id": booking.id,
         "booking_date": str(booking.booking_date),
@@ -284,18 +306,19 @@ def get_booking(booking_id: int, db: Session = Depends(get_db)):
         "user_name": mentee_user.name if mentee_user else "멘티"
     }
 
+
+# ==========================================================
+# 7. 결제 검증
+# ==========================================================
 @router.post("/payment/verify")
 def verify_payment(data: PaymentVerifyRequest):
     portone_secret = os.getenv("PORTONE_API_SECRET")
-
     if not portone_secret:
         raise HTTPException(status_code=500, detail="포트원 API Secret이 설정되지 않았습니다.")
 
     res = requests.get(
         f"https://api.portone.io/payments/{data.paymentId}",
-        headers={
-            "Authorization": f"PortOne {portone_secret}"
-        }
+        headers={"Authorization": f"PortOne {portone_secret}"}
     )
 
     if res.status_code != 200:
@@ -304,90 +327,94 @@ def verify_payment(data: PaymentVerifyRequest):
     payment = res.json()
 
     if payment.get("status") != "PAID":
-        raise HTTPException(
-            status_code=400,
-            detail=f"결제가 완료되지 않았습니다. 현재 상태: {payment.get('status')}"
-        )
+        raise HTTPException(status_code=400, detail=f"결제가 완료되지 않았습니다. 현재 상태: {payment.get('status')}")
 
     paid_amount = payment.get("amount", {}).get("total")
-
     if paid_amount != data.amount:
-        raise HTTPException(
-            status_code=400,
-            detail=f"결제 금액이 일치하지 않습니다. 결제금액: {paid_amount}, 요청금액: {data.amount}"
-        )
+        raise HTTPException(status_code=400, detail=f"결제 금액 불일치. 결제: {paid_amount}, 요청: {data.amount}")
 
-    return {
-        "success": True,
-        "paymentId": data.paymentId,
-        "orderId": data.orderId
-    }
+    return {"success": True, "paymentId": data.paymentId, "orderId": data.orderId}
 
+
+# ==========================================================
+# 8. CoffeeChats.jsx 전용 — CONFIRMED 예약 + tab_status 계산
+# ==========================================================
 @router.get("/{user_id}")
 def get_bookings(user_id: int, db: Session = Depends(get_db)):
-    mentor = db.query(Mentor).filter((Mentor.user_id == user_id) | (Mentor.id == user_id)).first()
+    print(f" [CoffeeChats 조회] User ID: {user_id}")
+
+    mentor = db.query(Mentor).filter(
+        (Mentor.user_id == user_id) | (Mentor.id == user_id)
+    ).first()
     mentor_id = mentor.id if mentor else -1
+
     bookings = db.query(Booking).filter(
-        Booking.status == "CONFIRMED", # PAID를 제외하고 CONFIRMED만 가져옴
-        ((Booking.user_id == user_id) | (Booking.mentor_id == mentor_id) | (Booking.mentor_id == user_id))
-    ).order_by(Booking.booking_date.desc()).all()
-    
+        Booking.status == "CONFIRMED",
+        (Booking.user_id == user_id) | (Booking.mentor_id == mentor_id)
+    ).order_by(Booking.booking_date.asc()).all()
+
     now = datetime.now()
     result = []
-    
+
     for b in bookings:
-        try:
-            booking_datetime = datetime.strptime(
-                f"{b.booking_date} {b.booking_time}", 
-                "%Y-%m-%d %H:%M"
-            )
-        except:
-            booking_datetime = datetime.strptime(
-                f"{b.booking_date} {b.booking_time}", 
-                "%Y-%m-%d %I:%M %p"
-            )
-        
+        booking_datetime = _parse_booking_datetime(b.booking_date, b.booking_time)
+
+        # ── tab_status 계산 ──────────────────────────────
+        # 1순위: ChatSession 상태가 명시적으로 COMPLETED/ONGOING이면 그걸 따름
         chat_session = db.query(ChatSession).filter(ChatSession.booking_id == b.id).first()
-        
-        tab_status = "upcoming"
+
         if chat_session and chat_session.status == "COMPLETED":
             tab_status = "completed"
         elif chat_session and chat_session.status == "ONGOING":
             tab_status = "ongoing"
         else:
-            if now < booking_datetime - timedelta(minutes=5):
+            # 2순위: 시간 기준으로 계산
+            diff_min = (booking_datetime - now).total_seconds() / 60
+
+            if diff_min > 5:
+                # 아직 5분 이상 남음 → 예정
                 tab_status = "upcoming"
-            elif booking_datetime - timedelta(minutes=5) <= now <= booking_datetime + timedelta(minutes=30):
+            elif -30 <= diff_min <= 5:
+                # 시작 5분 전 ~ 시작 후 30분 이내 → 진행중
                 tab_status = "ongoing"
             else:
+                # 30분 이상 지남 → 종료
                 tab_status = "completed"
-                
+
+        print(f" [tab_status] booking_id={b.id} date={b.booking_date} time={b.booking_time} "
+              f"booking_dt={booking_datetime} now={now} diff_min={round((booking_datetime - now).total_seconds()/60, 1)} "
+              f"→ {tab_status}")
+
+        # ── 상대방 이름 ──────────────────────────────────
         if b.user_id == user_id:
             target_mentor = db.query(Mentor).filter(Mentor.id == b.mentor_id).first()
             partner_name = target_mentor.name if target_mentor else f"멘토 #{b.mentor_id}"
         else:
             target_mentee = db.query(User).filter(User.id == b.user_id).first()
             partner_name = target_mentee.name if target_mentee else "크루(예약자)"
-        
-        # 💡 [여기에 추가!] 해당 예약에 대한 리뷰가 이미 있는지 확인합니다.
+
         has_review = db.query(Review).filter(Review.booking_id == b.id).first() is not None
 
         result.append({
             "id": b.id,
             "mentor_id": b.mentor_id,
-            "mentor_name": partner_name, 
+            "mentor_name": partner_name,
             "user_id": b.user_id,
             "booking_date": str(b.booking_date),
-            "booking_time": b.booking_time,
+            "booking_time": str(b.booking_time)[:5],  # HH:MM 만 전달
             "questions": b.questions,
             "status": b.status,
             "tab_status": tab_status,
-            "has_review": has_review, # 💡 [여기에 추가!] 프론트엔드로 전달!
+            "has_review": has_review,
             "created_at": str(b.created_at)
         })
 
     return result
 
+
+# ==========================================================
+# 9. 리뷰 작성
+# ==========================================================
 @router.post("/review/create")
 def create_review(request: ReviewCreateRequest, db: Session = Depends(get_db)):
     existing_review = db.query(Review).filter(Review.booking_id == request.booking_id).first()
@@ -413,10 +440,14 @@ def create_review(request: ReviewCreateRequest, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "리뷰가 저장됐어요!"}
 
+
+# ==========================================================
+# 10. 멘토 리뷰 조회
+# ==========================================================
 @router.get("/reviews/{mentor_id}")
 def get_mentor_reviews(mentor_id: int, db: Session = Depends(get_db)):
     reviews = db.query(Review).filter(Review.mentor_id == mentor_id).all()
-    
+
     result = []
     for r in reviews:
         user = db.query(User).filter(User.id == r.user_id).first()
@@ -430,30 +461,34 @@ def get_mentor_reviews(mentor_id: int, db: Session = Depends(get_db)):
             "comment": r.review,
             "created_at": str(r.created_at)
         })
-    
+
     return result
 
+
+# ==========================================================
+# 11. 유사 멘토 추천
+# ==========================================================
 @router.get("/recommend/{booking_id}")
 def get_recommended_mentors(booking_id: int, db: Session = Depends(get_db)):
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
         return []
-    
+
     current_mentor = db.query(Mentor).filter(Mentor.id == booking.mentor_id).first()
     if not current_mentor:
         return []
-    
+
     similar_mentors = db.query(Mentor).filter(
         Mentor.job_title == current_mentor.job_title,
         Mentor.id != current_mentor.id
     ).limit(3).all()
-    
+
     if len(similar_mentors) < 3:
         from sqlalchemy import func
         similar_mentors = db.query(Mentor).filter(
             Mentor.id != current_mentor.id
         ).order_by(func.random()).limit(3).all()
-    
+
     result = []
     for m in similar_mentors:
         user = db.query(User).filter(User.id == m.user_id).first()
@@ -464,5 +499,5 @@ def get_recommended_mentors(booking_id: int, db: Session = Depends(get_db)):
             "profile_image": user.profile_image if user else "",
             "avg_rating": getattr(m, 'avg_rating', 0) or 0
         })
-    
+
     return result
