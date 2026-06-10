@@ -36,7 +36,6 @@ if LANGUAGE_KEY and LANGUAGE_ENDPOINT:
         credential=AzureKeyCredential(LANGUAGE_KEY)
     )
 
-# 💡 [핵심 수정] 파이프라인도 Azure OpenAI 키를 바라보도록 변경합니다!
 AZURE_OPENAI_KEY = os.environ.get("AZURE_OPENAI_KEY")
 AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT")
 AZURE_DEPLOYMENT_NAME = os.environ.get("AZURE_DEPLOYMENT_NAME", "gpt-4o-2")
@@ -45,14 +44,14 @@ AZURE_API_VERSION = os.environ.get("AZURE_API_VERSION", "2024-12-01-preview")
 MASKING_DEPLOYMENT = "gpt-4o-mini" 
 SUMMARY_DEPLOYMENT = "gpt-4o"              
 
-# 💡 OpenAI 클라이언트도 키가 있을 때만 연결하도록 방어할 수 있습니다.
+# 💡 OpenAI 클라이언트 연결 방어 로직
 openai_client = None
 if AZURE_OPENAI_KEY:
     openai_client = AzureOpenAI(
-    api_key=AZURE_OPENAI_KEY,
-    api_version=AZURE_API_VERSION,
-    azure_endpoint=AZURE_OPENAI_ENDPOINT
-)
+        api_key=AZURE_OPENAI_KEY,
+        api_version=AZURE_API_VERSION,
+        azure_endpoint=AZURE_OPENAI_ENDPOINT
+    )
 
 # ==========================================
 # 🛡️ 통합 마스킹 엔진 (가명화 및 매핑)
@@ -95,20 +94,7 @@ class MaskingEngine:
             
         return text
     
-# ✨ 에러를 막기 위한 함수 래퍼 추가 (여기에 다 있습니다!)
-def agent_regex_masking(text):
-    return MaskingEngine().apply_regex(text)
-
-def agent_azure_pii(text):
-    return MaskingEngine().apply_azure_ner(text)
-
-def agent_llm_masking(text):
-    return text
-
-def agent_llm_summary(safe_text):
-    # 기존 요약 로직 그대로 유지
-    pass
-
+    # 💡 [핵심 수정] 엉뚱한 곳에 있던 이 함수를 MaskingEngine 클래스 안으로 들여왔습니다!
     def apply_azure_ner(self, text):
         """Azure PII는 훌륭한 엔터프라이즈용 NER(개체명 인식) 모델입니다."""
         if text_analytics_client is None:
@@ -140,6 +126,16 @@ def agent_llm_summary(safe_text):
             print(f"🚨 Azure NER 에러: {e}")
             return text
 
+# ✨ 외부 래퍼 함수들
+def agent_regex_masking(text):
+    return MaskingEngine().apply_regex(text)
+
+def agent_azure_pii(text):
+    return MaskingEngine().apply_azure_ner(text)
+
+def agent_llm_masking(text):
+    return text
+
 def demask_text(text, masking_map):
     """LLM이 만든 요약본의 토큰을 다시 원본으로 복구합니다."""
     print("🔄 [Agent 4] 원본 텍스트 복구(De-masking) 가동...")
@@ -148,7 +144,7 @@ def demask_text(text, masking_map):
     return text
 
 # ==========================================
-# 📝 Agent 3: LLM Summary (안전한 텍스트만 들어옵니다)
+# 📝 Agent 3: LLM Summary (중복 제거됨)
 # ==========================================
 def agent_llm_summary(safe_text):
     print("📝 [Agent 3] Summary AI 가동...")
@@ -190,13 +186,8 @@ def agent_llm_summary(safe_text):
     except Exception as e:
         return f"Error: {str(e)}"
 
-# PDF 생성 함수는 기존과 동일하게 유지...
-def generate_pdf_report(parsed_json, output_filename):
-# (이 부분은 작성자님의 기존 코드를 그대로 유지하세요)
-    pass
-
 # ==========================================
-# 📊 PDF 생성
+# 📊 PDF 생성 (중복 제거됨)
 # ==========================================
 def generate_pdf_report(parsed_json, output_filename):
     pdf = FPDF()
