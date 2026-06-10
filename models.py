@@ -7,7 +7,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker,relationship
-from sqlalchemy import Column, Integer, String,DateTime, UniqueConstraint, Text
+from sqlalchemy import Column, Integer, String,DateTime, UniqueConstraint, Text,JSON
 from sqlalchemy.sql import func
 from database import Base
 
