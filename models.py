@@ -145,6 +145,7 @@ class SavedMentor(Base):
     user_id    = Column(Integer, nullable=False, index=True)   # 찜한 사람 (users.id)
     mentor_id  = Column(Integer, nullable=False, index=True)   # 찜 대상  (mentors.id)
     created_at = Column(DateTime, server_default=func.now())
+    
 
 # ─── 3. DB 헬퍼 및 제너레이터 ───
 class Review(Base):
