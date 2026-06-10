@@ -55,100 +55,86 @@ if AZURE_OPENAI_KEY:
 )
 
 # ==========================================
-# ⚡ Agent 0: Regex Masking
+# 🛡️ 통합 마스킹 엔진 (가명화 및 매핑)
 # ==========================================
-def agent_regex_masking(text):
-    print("⚡ [Agent 0] Regex 가동...")
-    text = re.sub(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', '[기밀_이메일]', text)
-    text = re.sub(r'01[0-9][\-\s]?\d{3,4}[\-\s]?\d{4}', '[기밀_연락처]', text)
-    text = re.sub(r'\d{6}[\-\s]?[1-4]\d{6}', '[기밀_주민번호]', text)
-    text = re.sub(r'[\d,]+(?:\s*만|\s*억|\s*천)?\s*원', '[기밀_금액]', text)
-    text = re.sub(r'[\d\.]+\s*%', '[기밀_비율]', text)
-    text = re.sub(r'프로젝트\s+[가-힣A-Za-z0-9]+', '[기밀_프로젝트]', text)
-    text = re.sub(r'[가-힣A-Za-z0-9]+\s*프로젝트', '[기밀_프로젝트]', text)
-    text = re.sub(r'(DAU|MAU|가입자|트래픽|방문자)(?:\s*수)?\s*[\d,\.]+(?:만|천)?\s*(?:명|건|회)?', r'\1 [기밀_지표]', text)
-    text = re.sub(r'(시리즈|Series)\s*[A-Z]|(시드|Pre-A)\s*(?:투자|라운드)?', '[기밀_투자라운드]', text)
-    text = re.sub(r'([가-힣a-zA-Z0-9]+\s*(?:팀|본부|실|파트))\s*[\d,\.]+(?:여)?\s*명', r'\1 [기밀_조직규모]', text)
-    text = re.sub(r'(?:고과|인사평가|평가)?\s*[SABCD][\+\-]?\s*등급', '[기밀_인사평가]', text)
-    text = re.sub(r'([가-힣A-Za-z0-9]+(?:사|기업|업체|전자|차|은행)?)(?:와|이랑|에|과)\s*(?:계약|MOU|납품|제휴|파트너십)', '[기밀_고객사]와 계약/제휴', text)
-    text = re.sub(r'(?:내년|올해|상반기|하반기)?\s*(?:[1-4]분기|Q[1-4])\s*(?:출시|런칭|오픈|진출|배포)', '[기밀_일정] 런칭', text)
-    text = re.sub(r'(?:코스피|코스닥|나스닥)?\s*(?:상장|IPO|인수|합병|M&A)\s*(?:준비|예정|진행|추진|실사)', '[기밀_M&A/IPO] 진행', text)
-    text = re.sub(r'([A-Za-z0-9가-힣]+)(?:로|으로)\s*(?:마이그레이션|전환|이관)|(?:랜섬웨어|디도스|해킹)\s*(?:감염|공격|터져서)', '[기밀_보안/인프라]', text)
-    return text
+class MaskingEngine:
+    def __init__(self):
+        self.masking_map = {} # {'[이메일_1]': 'daeun@gmail.com'}
+        self.reverse_map = {} # {'daeun@gmail.com': '[이메일_1]'}
+        self.counters = {}    # {'이메일': 1}
 
-# ==========================================
-# 🛡️ Agent 1: Azure PII
-# ==========================================
-def agent_azure_pii(text):
-# 💡 [추가] 클라이언트가 None이면 바로 통과시키도록 방어 로직 추가
-    if text_analytics_client is None:
-        print("⚠️ [경고] Azure API 키가 없어서 Agent 1(PII)을 건너뛰고 Agent 2로 넘어갑니다.")
+    def _get_token(self, category, original_text):
+        # 이미 등록된 단어면 같은 토큰 반환 (문맥 유지)
+        if original_text in self.reverse_map:
+            return self.reverse_map[original_text]
+        
+        # 새 단어면 카운트 올리고 새 토큰 발급
+        self.counters[category] = self.counters.get(category, 0) + 1
+        token = f"[{category}_{self.counters[category]}]"
+        
+        self.masking_map[token] = original_text
+        self.reverse_map[original_text] = token
+        return token
+
+    def apply_regex(self, text):
+        print("⚡ [Agent 0] Regex 가명화 가동...")
+        
+        # 정규식 패턴과 카테고리 정의
+        patterns = [
+            (r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', '이메일'),
+            (r'01[0-9][\-\s]?\d{3,4}[\-\s]?\d{4}', '연락처'),
+            (r'\d{6}[\-\s]?[1-4]\d{6}', '주민번호'),
+            (r'[\d,]+(?:\s*만|\s*억|\s*천)?\s*원', '금액'),
+            (r'[\d\.]+\s*%', '비율')
+        ]
+        
+        for pattern, category in patterns:
+            def replace_func(match):
+                return self._get_token(category, match.group(0))
+            text = re.sub(pattern, replace_func, text)
+            
         return text
-    
-    print("🛡️ [Agent 1] Azure PII 가동...")
-    max_retries = 3
-    for attempt in range(max_retries):
+
+    def apply_azure_ner(self, text):
+        """Azure PII는 훌륭한 엔터프라이즈용 NER(개체명 인식) 모델입니다."""
+        if text_analytics_client is None:
+            print("⚠️ Azure API 키가 없어 NER 마스킹을 건너뜁니다.")
+            return text
+            
+        print("🛡️ [Agent 1] Azure NER 가명화 가동...")
         try:
-            response = text_analytics_client.recognize_pii_entities([text], language="ko")
-            if not response[0].is_error:
-                return response[0].redacted_text
-            else:
-                print(f"⚠️ Azure 내부 에러: {response[0].error.message}")
+            response = text_analytics_client.recognize_pii_entities([text], language="ko")[0]
+            if response.is_error:
+                return text
+                
+            # 위치(offset) 역순으로 정렬하여 텍스트 치환 시 인덱스 꼬임 방지
+            entities = sorted(response.entities, key=lambda x: x.offset, reverse=True)
+            for entity in entities:
+                # 사람, 조직, 위치 등 민감 개체명만 토큰화
+                if entity.category in ['Person', 'Organization', 'Location', 'PhoneNumber', 'Email']:
+                    category_kr = "인물" if entity.category == 'Person' else \
+                                  "조직" if entity.category == 'Organization' else \
+                                  "위치" if entity.category == 'Location' else "기밀"
+                    
+                    original_text = text[entity.offset:entity.offset + entity.length]
+                    token = self._get_token(category_kr, original_text)
+                    
+                    # 텍스트 치환
+                    text = text[:entity.offset] + token + text[entity.offset + entity.length:]
+            return text
         except Exception as e:
-            error_msg = str(e)
-            print(f"🚨 Azure PII 에러 (시도 {attempt + 1}/{max_retries})")
-            if "429" in error_msg or "Too Many Requests" in error_msg:
-                time.sleep(3)
-            else:
-                time.sleep(2)
-    print("❌ Azure PII 실패.")
+            print(f"🚨 Azure NER 에러: {e}")
+            return text
+
+def demask_text(text, masking_map):
+    """LLM이 만든 요약본의 토큰을 다시 원본으로 복구합니다."""
+    print("🔄 [Agent 4] 원본 텍스트 복구(De-masking) 가동...")
+    for token, original in masking_map.items():
+        text = text.replace(token, original)
     return text
 
 # ==========================================
-# 🕵️ Agent 2: LLM JSON Masking
-# ==========================================
-def agent_llm_masking(text):
-    print("🕵️ [Agent 2] Masking AI 가동...")
-    system_prompt = """
-    당신은 IT 기업의 최고 보안 책임자(CISO)입니다.
-    제공된 텍스트에서 잔여 기밀 정보를 찾아내세요.
-    [잔여 마스킹 대상]
-    1. 학교, 대학교 등 학력 정보
-    2. 직장명, 소속 고유명사
-    3. 구체적인 보상 및 처우
-    4. 미공개 특허 및 핵심 기술
-    5. 인증/크레덴셜
-    6. 사람 이름
-    7. 음차/변형된 개인정보
-    반드시 아래 JSON 형식으로만 출력하세요.
-    {"replacements": [{"original": "한국대학교", "masked": "[기밀_학교]"}]}
-    """
-    try:
-        response = openai_client.chat.completions.create(
-            model=MASKING_DEPLOYMENT,
-            response_format={"type": "json_object"},
-            temperature=0.0,
-            max_tokens=10000,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"출력은 반드시 'replacements' 키를 가진 JSON으로 주세요.\n\n{text}"}
-            ]
-        )
-        result_json = json.loads(response.choices[0].message.content)
-        replacements = result_json.get("replacements", [])
-        masked_text = text
-        for item in replacements:
-            original = item.get("original", "")
-            masked = item.get("masked", "")
-            if original:
-                masked_text = masked_text.replace(original, masked)
-        return masked_text
-    except Exception as e:
-        print("🚨 Masking AI 에러:", e)
-        return text
-
-# ==========================================
-# 📝 Agent 3: LLM Summary
+# 📝 Agent 3: LLM Summary (안전한 텍스트만 들어옵니다)
 # ==========================================
 def agent_llm_summary(safe_text):
     print("📝 [Agent 3] Summary AI 가동...")
@@ -189,6 +175,11 @@ def agent_llm_summary(safe_text):
         return response.choices[0].message.content
     except Exception as e:
         return f"Error: {str(e)}"
+
+# PDF 생성 함수는 기존과 동일하게 유지...
+def generate_pdf_report(parsed_json, output_filename):
+# (이 부분은 작성자님의 기존 코드를 그대로 유지하세요)
+    pass
 
 # ==========================================
 # 📊 PDF 생성
