@@ -84,31 +84,27 @@ def get_chat_session(booking_id: int, db: Session = Depends(get_db)):
 
 
 # ==========================================
-# 2. 리뷰(요약본) 생성 API (쪼개진 코드 복구)
+# 2. 리뷰(요약본) 생성 API 
 # ==========================================
 @router.post("/api/review/create")
 def create_review(request: ReviewCreateRequest, db: Session = Depends(get_db)):
     print(f" [리뷰/요약본 생성] booking_id={request.booking_id}, rating={request.rating}")
     
-    # 1. 먼저 매핑된 커피챗 세션이 있는지 확인합니다.
     session = db.query(ChatSession).filter(ChatSession.booking_id == request.booking_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="연동된 채팅 세션을 찾을 수 없습니다.")
     
-    # 2. 이미 해당 세션으로 만들어진 리포트가 있는지 확인합니다.
     report = db.query(CoffeeChatReport).filter(CoffeeChatReport.chatsession_id == session.id).first()
     
     if report:
-        # 이미 존재하면 요약 내용만 업데이트
         report.summary = request.review
     else:
-        # 없으면 새로운 리포트 레코드를 생성하여 summary 저장
         report = CoffeeChatReport(
             chatsession_id=session.id,
             mentor_id=session.mentor_id,
-            mentee_id=session.user_id,  # ChatSession의 user_id가 멘티입니다.
+            mentee_id=session.user_id, 
             summary=request.review,
-            ai_advice=None  # AI 어드바이스는 나중에 태욱님 파트에서 업데이트
+            ai_advice=None  
         )
         db.add(report)
         
@@ -117,7 +113,7 @@ def create_review(request: ReviewCreateRequest, db: Session = Depends(get_db)):
 
 
 # ==========================================
-# ✅ AI 요약 생성 파이프라인
+# ✅ AI 요약 생성 파이프라인 (500 에러 해결!)
 # ==========================================
 @router.post("/api/chat-session/{chat_id}/generate-summary")
 async def generate_summary(chat_id: int, db: Session = Depends(get_db)):
@@ -134,14 +130,22 @@ async def generate_summary(chat_id: int, db: Session = Depends(get_db)):
         step0 = engine.apply_regex(raw_text)
         safe_text = engine.apply_azure_ner(step0)
 
-        new_report = CoffeeChatReport(
-            chatsession_id=session.id,
-            mentor_id=session.mentor_id,
-            mentee_id=session.user_id,
-            stt_masked=safe_text,
-            masking_map=engine.masking_map
-        )
-        db.add(new_report)
+        # 💡 [핵심 수정] 무조건 새로 만들지 않고, 기존 리포트가 있으면 업데이트합니다!
+        existing_report = db.query(CoffeeChatReport).filter(CoffeeChatReport.chatsession_id == session.id).first()
+        
+        if existing_report:
+            existing_report.stt_masked = safe_text
+            existing_report.masking_map = engine.masking_map
+        else:
+            new_report = CoffeeChatReport(
+                chatsession_id=session.id,
+                mentor_id=session.mentor_id,
+                mentee_id=session.user_id,
+                stt_masked=safe_text,
+                masking_map=engine.masking_map
+            )
+            db.add(new_report)
+            
         db.flush()
 
         final_json_str = agent_llm_summary(safe_text)
@@ -196,7 +200,7 @@ async def download_summary_pdf(chat_id: int, db: Session = Depends(get_db)):
 
 
 # ==========================================
-# 5. 리포트 페이지 전용 데이터 조회 API (오류 수정됨)
+# 5. 리포트 페이지 전용 데이터 조회 API 
 # ==========================================
 @router.get("/api/coffee-chat-report/{booking_id}")
 def get_coffee_chat_report(booking_id: int, db: Session = Depends(get_db)):
