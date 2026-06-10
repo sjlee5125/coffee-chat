@@ -53,7 +53,7 @@ app.include_router(ai.router)
 app.include_router(notifications.router)
 app.include_router(chat.router)
 app.include_router(chat_router.router) # 👈 💡 서버가 우리 라우터를 인식하게끔 이 한 줄을 추가합니다!
-app.include_router(pipeline.router)
+#app.include_router(pipeline.router)
 
 @app.get("/")
 def root():

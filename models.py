@@ -2,7 +2,7 @@ import enum
 import socket
 from datetime import datetime
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Boolean, Text,
+    create_engine, JSON, Column, Integer, String, Boolean, Text,
     Enum, DateTime, ForeignKey, Date, Boolean, func, UniqueConstraint
 )
 from sqlalchemy.ext.declarative import declarative_base
@@ -132,6 +132,31 @@ class ChatSession(Base):
     ai_summary = Column(Text, nullable=True)
     status = Column(String(20), default="READY")
     created_at = Column(DateTime, server_default=func.now())
+
+class CoffeeChatReport(Base):
+    """커피챗 종료 후 생성되는 AI 요약 리포트 리포지토리"""
+    __tablename__ = "coffee_chat_reports"
+    __table_args__ = {'schema': 'public'}
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # ChatSession 테이블과의 1:1 매칭 제약조건 및 종속 삭제 설정
+    chatsession_id = Column(Integer, ForeignKey("public.chat_sessions.id", ondelete="CASCADE"), unique=True, nullable=False)
+    
+    # 서비스 안정성을 위한 멘토/멘티 외래키 연결
+    mentor_id = Column(Integer, ForeignKey("public.mentors.id"), nullable=False)
+    mentee_id = Column(Integer, ForeignKey("public.users.id"), nullable=False)
+    
+    # 텍스트 데이터 보관용 대용량 필드
+    stt_masked = Column(Text, nullable=True)
+    summary = Column(Text, nullable=True)
+    ai_advice = Column(Text, nullable=True)
+    
+    # 타임스탬프 자동화 
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    masking_map = Column(JSON, nullable=True)
 
 class SavedMentor(Base):
     """멘티가 관심(찜)한 멘토 목록"""
