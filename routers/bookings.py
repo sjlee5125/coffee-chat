@@ -234,19 +234,22 @@ def get_mentor_bookings(mentor_id: int, db: Session = Depends(get_db)):
         mentee = db.query(User).filter(User.id == b.user_id).first()
         result.append({
             "booking_id": b.id,
-            "mentee_name": mentee.name if mentee else "익명 크루",
+            "partner_name": mentee.name if mentee else "익명 크루",   # ← 프론트가 읽는 키
+            "partner_image": mentee.profile_image if mentee and hasattr(mentee, 'profile_image') else None,
+            "mentee_name": mentee.name if mentee else "익명 크루",    # ← 기존 키 유지 (혹시 다른 곳에서 쓸 수 있으니)
             "mentee_image": mentee.profile_image if mentee and hasattr(mentee, 'profile_image') else None,
             "booking_date": str(b.booking_date) if b.booking_date else "", 
             "booking_time": str(b.booking_time) if b.booking_time else "",
             "candidate_times": f"{b.booking_date} {b.booking_time}",
             "questions": b.questions,
             "status": b.status
-        })
+})
     return result
 
 @router.get("/mentee/{user_id}")
 def get_mentee_bookings(user_id: int, db: Session = Depends(get_db)):
-    bookings = db.query(Booking).filter(Booking.user_id == user_id).all()
+    bookings = db.query(Booking).filter(Booking.user_id == user_id)\
+    .order_by(Booking.created_at.desc()).all()
 
     result = []
     for b in bookings:
