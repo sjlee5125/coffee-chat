@@ -1,10 +1,16 @@
 import json
 import logging
 import os
-from typing import Dict, List
+from typing import Dict, List, Optional  # 💡 Optional 추가
 
+from pydantic import BaseModel  # 💡 BaseModel 추가
 from dotenv import load_dotenv
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends  # 💡 Depends 추가
+from sqlalchemy.orm import Session  # 💡 Session 추가
+
+# 💡 DB 모델 및 의존성 추가 (models 파일에서 가져옴)
+from models import get_db, Booking, Mentor
+
 from routers.pipeline import agent_regex_masking, agent_azure_pii, agent_llm_masking, agent_llm_summary
 
 class RecommendQuestionRequest(BaseModel):
