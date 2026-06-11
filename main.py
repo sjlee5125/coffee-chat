@@ -15,7 +15,7 @@ from openai import AzureOpenAI
 from auth import router
 from models import User, Mentor, Booking, MentorAvailability, ChatSession, get_db, create_tables
 import auth
-from routers import users, mentors, bookings, ai, notifications, chat, chat_router, webrtc, stt, lim_chat, pipeline, general_chat
+from routers import users, mentors, bookings, ai, notifications, chat, chat_router, webrtc, stt, lim_chat, pipeline, general_chat, announcement
 # 서버 실행 시 시스템의 .env 환경변수를 로드 및 DB 초기화
 from routers.dashboard_router import router as dashboard_router_obj
 load_dotenv()
@@ -54,6 +54,7 @@ app.include_router(notifications.router)
 app.include_router(chat.router)
 app.include_router(chat_router.router) # 👈 💡 서버가 우리 라우터를 인식하게끔 이 한 줄을 추가합니다!
 #app.include_router(pipeline.router)
+app.include_router(announcement.router)
 
 @app.get("/")
 def root():
