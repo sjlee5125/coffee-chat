@@ -95,7 +95,65 @@ async def llm_assistant(
             except json.JSONDecodeError:
                 continue
 
-            if data.get("type") != "question":
+            msg_type = data.get("type")
+
+            # 추천 질문 요청 처리
+            if msg_type == "recommend_questions":
+                conversation = data.get("conversation", "")
+                preset_questions = data.get("preset_questions", "")
+                
+                if not llm_client:
+                    await websocket.send_json({
+                        "type": "recommended_questions",
+                        "questions": [
+                            "현재 직무에서 가장 중요한 역량은 무엇인가요?",
+                            "처음 이 직무를 시작했을 때 어려웠던 점은?",
+                            "신입 지원자에게 해주고 싶은 조언이 있으신가요?"
+                        ]
+                    })
+                    continue
+
+                try:
+                    recommend_prompt = f"""커피챗 대화 내용:
+{conversation}
+
+멘티가 준비한 질문:
+{preset_questions}
+
+위 대화 흐름을 보고 멘티가 지금 물어보면 좋을 질문 3개를 JSON 배열로만 응답하세요.
+예시: ["질문1", "질문2", "질문3"]"""
+
+                    response = llm_client.chat.completions.create(
+                        model=AZURE_DEPLOYMENT_NAME,
+                        messages=[
+                            {"role": "system", "content": "당신은 커피챗 멘토링 어시스턴트입니다. JSON 배열로만 응답하세요."},
+                            {"role": "user", "content": recommend_prompt}
+                        ],
+                        temperature=0.7,
+                        max_tokens=300
+                    )
+                    
+                    import json as json_module
+                    content = response.choices[0].message.content.strip()
+                    questions = json_module.loads(content)
+                    
+                    await websocket.send_json({
+                        "type": "recommended_questions",
+                        "questions": questions
+                    })
+                    
+                except Exception as e:
+                    await websocket.send_json({
+                        "type": "recommended_questions",
+                        "questions": [
+                            "현재 직무에서 가장 중요한 역량은 무엇인가요?",
+                            "처음 이 직무를 시작했을 때 어려웠던 점은?",
+                            "신입 지원자에게 해주고 싶은 조언이 있으신가요?"
+                        ]
+                    })
+                continue
+
+            if msg_type != "question":
                 continue
 
             user_text = data.get("text", "").strip()
