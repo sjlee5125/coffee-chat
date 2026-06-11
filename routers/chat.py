@@ -250,41 +250,53 @@ def get_coffee_chat_report(booking_id: int, db: Session = Depends(get_db)):
 # ==========================================
 @router.post("/api/wrap-up/{chat_id}")
 async def get_wrapup_report(chat_id: int, db: Session = Depends(get_db)):
-    # 💡 프론트에서 넘어오는 chat_id는 사실 booking_id(예약 번호)입니다.
     booking_id = chat_id
-    print(f"🔄 [AI 랩업 리포트 생성 요청] Booking ID: {booking_id}")
+    print(f"🔄 [AI 랩업 리포트 생성 요청] Booking ID: {booking_id} 번으로 조회를 시작합니다.")
     
-    # 1. 먼저 booking_id와 매칭되는 ChatSession을 찾습니다.
+    # 1. 징검다리인 ChatSession 테이블에서 booking_id로 검색
     session = db.query(ChatSession).filter(ChatSession.booking_id == booking_id).first()
     if not session:
-        raise HTTPException(status_code=404, detail="연동된 채팅 세션(ChatSession)을 찾을 수 없습니다.")
+        print(f"❌ [404 에러 발생 원인] DB에 Booking ID {booking_id} 번과 연결된 ChatSession 레코드가 아예 없습니다!")
+        raise HTTPException(
+            status_code=404, 
+            detail=f"예약 번호({booking_id})와 연동된 채팅 세션(ChatSession) 데이터가 DB에 없습니다. 세션 시작/종료가 정상 처리되었는지 확인하세요."
+        )
     
-    # 2. 찾아낸 session.id를 가지고 CoffeeChatReport 테이블을 조회합니다! (정확한 매칭)
+    # 2. 찾아낸 session.id를 가지고 CoffeeChatReport 테이블 조회
     report_record = db.query(CoffeeChatReport).filter(CoffeeChatReport.chatsession_id == session.id).first()
-    
     if not report_record:
-        raise HTTPException(status_code=404, detail="해당 커피챗의 리포트 데이터(CoffeeChatReport)를 찾을 수 없습니다.")
+        print(f"❌ [404 에러 발생 원인] ChatSession(ID: {session.id})은 찾았으나, 이와 연결된 CoffeeChatReport 레코드가 DB에 없습니다!")
+        raise HTTPException(
+            status_code=404, 
+            detail=f"채팅 세션 번호({session.id})와 연동된 리포트 데이터(CoffeeChatReport)가 DB에 존재하지 않습니다."
+        )
     
+    # 3. 마스킹된 텍스트가 존재하는지 확인
     if not report_record.stt_masked:
-        raise HTTPException(status_code=400, detail="마스킹 처리된 대화록(stt_masked)이 아직 준비되지 않았습니다.")
+        print(f"⚠️ [400 에러 발생 원인] 데이터들은 매칭되었으나, 리포트 내부의 stt_masked(마스킹 대화록) 컬럼이 완전히 비어있습니다.")
+        raise HTTPException(
+            status_code=400, 
+            detail="마스킹 처리된 대화록(stt_masked)이 아직 준비되지 않았습니다. 실시간 STT 데이터 전송 상태를 확인하세요."
+        )
     
+    # 4. 이미 저장된 결과가 있는지 확인 (캐시)
     if report_record.ai_advice:
-        print(f"💾 [캐시 사용] 이미 생성된 AI 어드바이스 존재. Booking ID: {booking_id}")
+        print(f"💾 [캐시 사용] 이미 생성된 AI 어드바이스가 존재하여 즉시 반환합니다. Booking ID: {booking_id}")
         return {"status": "success", "report": report_record.ai_advice}
 
     try:
         from routers.ai_service import generate_wrapup_report 
         
-        print(f"🤖 [LLM 호출] 세션 {session.id}번의 마스킹 데이터 기반 어드바이스 생성 시작...")
+        print(f"🤖 [LLM 호출] 세션 {session.id}번의 stt_masked 데이터를 기반으로 GPT 분석을 요청합니다...")
         ai_report = generate_wrapup_report(host_text=report_record.stt_masked, guest_text="")
         
         report_record.ai_advice = ai_report
         db.commit()
-        print(f"✅ [DB 저장 완료] Booking ID: {booking_id}")
+        print(f"✅ [DB 저장 완료] Booking ID: {booking_id} 번 리포트에 ai_advice 저장을 완료했습니다.")
         
         return {"status": "success", "report": ai_report}
 
     except Exception as e:
         db.rollback()
-        print(f"🚨 [AI 리포트 생성 실패] {str(e)}")
+        print(f"🚨 [AI 리포트 생성 실패] OpenAI 연동 혹은 문맥 처리 중 예외 발생: {str(e)}")
         raise HTTPException(status_code=500, detail=f"AI 어드바이스 생성 중 오류 발생: {str(e)}")
