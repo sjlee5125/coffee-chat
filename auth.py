@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from models import User, get_db, UserRole
 from fastapi import APIRouter
+from fastapi.security import OAuth2PasswordBearer
+import jwt
 
 router = APIRouter()
 
@@ -110,3 +112,27 @@ def get_kakao_user_info(access_token: str):
     response = requests.get(url, headers=headers)
     if response.status_code != 200: raise HTTPException(status_code=400, detail="카카오 유저 정보 실패")
     return response.json()
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="로그인이 필요합니다.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        # 1. 토큰 해석 (SECRET_KEY와 ALGORITHM은 auth.py 상단에 정의된 것을 사용)
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: int = payload.get("user_id")
+        if user_id is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+        
+    # 2. DB에서 유저 정보 조회
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise credentials_exception
+        
+    return user

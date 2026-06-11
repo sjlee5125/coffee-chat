@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from models import Announcement, User, UserRole, get_db
-from database import get_current_user # 기존 인증 함수
+from auth import get_current_user # 기존 인증 함수
 
 router = APIRouter(prefix="/api/announcements", tags=["announcements"])
 
