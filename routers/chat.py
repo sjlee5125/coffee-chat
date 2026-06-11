@@ -250,29 +250,37 @@ def get_coffee_chat_report(booking_id: int, db: Session = Depends(get_db)):
 # ==========================================
 @router.post("/api/wrap-up/{chat_id}")
 async def get_wrapup_report(chat_id: int, db: Session = Depends(get_db)):
-    print(f"🔄 [AI 랩업 리포트 생성 요청] Chat ID: {chat_id}")
+    # 💡 프론트에서 넘어오는 chat_id는 사실 booking_id(예약 번호)입니다.
+    booking_id = chat_id
+    print(f"🔄 [AI 랩업 리포트 생성 요청] Booking ID: {booking_id}")
     
-    report_record = db.query(CoffeeChatReport).filter(CoffeeChatReport.chatsession_id == chat_id).first()
+    # 1. 먼저 booking_id와 매칭되는 ChatSession을 찾습니다.
+    session = db.query(ChatSession).filter(ChatSession.booking_id == booking_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="연동된 채팅 세션(ChatSession)을 찾을 수 없습니다.")
+    
+    # 2. 찾아낸 session.id를 가지고 CoffeeChatReport 테이블을 조회합니다! (정확한 매칭)
+    report_record = db.query(CoffeeChatReport).filter(CoffeeChatReport.chatsession_id == session.id).first()
     
     if not report_record:
-        raise HTTPException(status_code=404, detail="해당 커피챗의 리포트 데이터를 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="해당 커피챗의 리포트 데이터(CoffeeChatReport)를 찾을 수 없습니다.")
     
     if not report_record.stt_masked:
         raise HTTPException(status_code=400, detail="마스킹 처리된 대화록(stt_masked)이 아직 준비되지 않았습니다.")
     
     if report_record.ai_advice:
-        print(f"💾 [캐시 사용] 이미 생성된 AI 어드바이스 존재. Chat ID: {chat_id}")
+        print(f"💾 [캐시 사용] 이미 생성된 AI 어드바이스 존재. Booking ID: {booking_id}")
         return {"status": "success", "report": report_record.ai_advice}
 
     try:
         from routers.ai_service import generate_wrapup_report 
         
-        print(f"🤖 [LLM 호출] {chat_id}번 방 마스킹 데이터 기반 어드바이스 생성 시작...")
+        print(f"🤖 [LLM 호출] 세션 {session.id}번의 마스킹 데이터 기반 어드바이스 생성 시작...")
         ai_report = generate_wrapup_report(host_text=report_record.stt_masked, guest_text="")
         
         report_record.ai_advice = ai_report
         db.commit()
-        print(f"✅ [DB 저장 완료] Chat ID: {chat_id}")
+        print(f"✅ [DB 저장 완료] Booking ID: {booking_id}")
         
         return {"status": "success", "report": ai_report}
 
