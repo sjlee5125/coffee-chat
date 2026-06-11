@@ -374,8 +374,8 @@ def get_bookings(user_id: int, db: Session = Depends(get_db)):
             else:
                 tab_status = "completed"
 
-        print(f" [tab_status] booking_id={b.id} date={b.booking_date} time={b.booking_time} "
-              f"→ {tab_status} (최종 확정된 분기)")
+        #print(f" [tab_status] booking_id={b.id} date={b.booking_date} time={b.booking_time} "
+         #     f"→ {tab_status} (최종 확정된 분기)")
 
         # ── 상대방 이름 매핑 ──────────────────────────────────
         if b.user_id == user_id:
