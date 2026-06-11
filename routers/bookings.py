@@ -25,12 +25,6 @@ class PaymentVerifyRequest(BaseModel):
     orderId: str
     amount: int
 
-class ReviewCreateRequest(BaseModel):
-    booking_id: int
-    user_id: int
-    mentor_id: int
-    rating: int
-    review: str
 
 
 # ==========================================================
@@ -413,32 +407,9 @@ def get_bookings(user_id: int, db: Session = Depends(get_db)):
 
 
 # ==========================================================
-# 9. 리뷰 작성
+# 9. 리뷰 작성-chat.py 파일로 이동
 # ==========================================================
-@router.post("/review/create")
-def create_review(request: ReviewCreateRequest, db: Session = Depends(get_db)):
-    existing_review = db.query(Review).filter(Review.booking_id == request.booking_id).first()
-    if existing_review:
-        raise HTTPException(status_code=400, detail="이미 작성된 리뷰가 있습니다.")
 
-    review = Review(
-        booking_id=request.booking_id,
-        user_id=request.user_id,
-        mentor_id=request.mentor_id,
-        rating=request.rating,
-        review=request.review
-    )
-    db.add(review)
-
-    mentor = db.query(Mentor).filter(Mentor.id == request.mentor_id).first()
-    if mentor:
-        reviews = db.query(Review).filter(Review.mentor_id == request.mentor_id).all()
-        total = sum(r.rating for r in reviews) + request.rating
-        count = len(reviews) + 1
-        mentor.avg_rating = total / count
-
-    db.commit()
-    return {"message": "리뷰가 저장됐어요!"}
 
 
 # ==========================================================
