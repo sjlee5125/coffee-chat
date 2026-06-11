@@ -2,7 +2,7 @@ import enum
 import socket
 from datetime import datetime
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Boolean, Text,
+    create_engine, JSON, Column, Integer, String, Boolean, Text,
     Enum, DateTime, ForeignKey, Date, Boolean, func, UniqueConstraint
 )
 from sqlalchemy.ext.declarative import declarative_base
@@ -133,20 +133,6 @@ class ChatSession(Base):
     status = Column(String(20), default="READY")
     created_at = Column(DateTime, server_default=func.now())
 
-class SavedMentor(Base):
-    """멘티가 관심(찜)한 멘토 목록"""
-    __tablename__ = "saved_mentors"
-    __table_args__ = (
-        UniqueConstraint('user_id', 'mentor_id', name='uq_saved_mentor'),
-        {'schema': 'public'}
-    )
- 
-    id         = Column(Integer, primary_key=True, index=True)
-    user_id    = Column(Integer, nullable=False, index=True)   # 찜한 사람 (users.id)
-    mentor_id  = Column(Integer, nullable=False, index=True)   # 찜 대상  (mentors.id)
-    created_at = Column(DateTime, server_default=func.now())
-    
-
 class CoffeeChatReport(Base):
     """커피챗 종료 후 생성되는 AI 요약 리포트 리포지토리"""
     __tablename__ = "coffee_chat_reports"
@@ -171,6 +157,20 @@ class CoffeeChatReport(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     masking_map = Column(JSON, nullable=True)
+
+class SavedMentor(Base):
+    """멘티가 관심(찜)한 멘토 목록"""
+    __tablename__ = "saved_mentors"
+    __table_args__ = (
+        UniqueConstraint('user_id', 'mentor_id', name='uq_saved_mentor'),
+        {'schema': 'public'}
+    )
+ 
+    id         = Column(Integer, primary_key=True, index=True)
+    user_id    = Column(Integer, nullable=False, index=True)   # 찜한 사람 (users.id)
+    mentor_id  = Column(Integer, nullable=False, index=True)   # 찜 대상  (mentors.id)
+    created_at = Column(DateTime, server_default=func.now())
+    
 
 # ─── 3. DB 헬퍼 및 제너레이터 ───
 class Review(Base):

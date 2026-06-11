@@ -1,11 +1,21 @@
 import json
 import logging
 import os
-from typing import Dict, List
+from typing import Dict, List, Optional  # 💡 Optional 추가
 
+from pydantic import BaseModel  # 💡 BaseModel 추가
 from dotenv import load_dotenv
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends  # 💡 Depends 추가
+from sqlalchemy.orm import Session  # 💡 Session 추가
+
+# 💡 DB 모델 및 의존성 추가 (models 파일에서 가져옴)
+from models import get_db, Booking, Mentor
+
 from routers.pipeline import agent_regex_masking, agent_azure_pii, agent_llm_masking, agent_llm_summary
+
+class RecommendQuestionRequest(BaseModel):
+    booking_id: int
+    stt_text: Optional[str] = ""
 
 
 load_dotenv()
@@ -196,3 +206,60 @@ async def generate_summary(chat_id: int):
         print(f"🚨 파이프라인 에러 발생: {e}")
         from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=f"요약본 생성 중 서버 에러: {str(e)}")
+    
+
+# ----------------------------------------ai추천질문----------------------------------------
+@router.post("/recommend-question")
+async def recommend_question(request: RecommendQuestionRequest, db: Session = Depends(get_db)):
+    print(f" [추천 질문 생성] booking_id={request.booking_id}")
+    
+    # 1. 예약 정보 가져오기 (멘티 질문지, 멘토 직무)
+    booking = db.query(Booking).filter(Booking.id == request.booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="예약 정보 없음")
+    
+    mentor = db.query(Mentor).filter(Mentor.id == booking.mentor_id).first()
+    mentor_job = mentor.job_title if mentor else "현직자"
+    mentee_questions = booking.questions or ""
+
+    # 2. 프롬프트 구성
+    system_prompt = """당신은 커피챗 멘토링 어시스턴트입니다.
+멘티가 멘토에게 물어볼 수 있는 좋은 질문 3개를 추천해주세요.
+반드시 JSON 배열 형태로만 응답하세요.
+예시: ["질문1", "질문2", "질문3"]"""
+
+    user_prompt = f"""멘토 직무: {mentor_job}
+멘티가 준비한 질문: {mentee_questions}
+지금까지 나눈 대화: {request.stt_text or '아직 대화 없음'}
+
+위 내용을 바탕으로 지금 이 순간 멘티가 물어보면 좋을 질문 3개를 추천해주세요."""
+
+    # 3. Azure OpenAI 호출
+    try:
+        from routers.ai_service import client, DEPLOYMENT_NAME
+        if not client:
+            return {"questions": ["멘토님의 커리어 전환 계기가 궁금해요!", "현재 직무에서 가장 중요한 역량은 무엇인가요?", "신입으로서 준비해야 할 것들이 있을까요?"]}
+        
+        response = client.chat.completions.create(
+            model=DEPLOYMENT_NAME,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.7,
+            max_tokens=500
+        )
+        
+        import json
+        content = response.choices[0].message.content.strip()
+        questions = json.loads(content)
+        return {"questions": questions}
+        
+    except Exception as e:
+        print(f" [추천 질문 생성 실패]: {e}")
+        # 기본 질문 반환
+        return {"questions": [
+            f"{mentor_job} 직무에서 가장 중요한 역량은 무엇인가요?",
+            "처음 이 직무를 시작했을 때 가장 어려웠던 점은 무엇인가요?",
+            "신입 지원자에게 해주고 싶은 조언이 있으신가요?"
+        ]}
