@@ -132,6 +132,7 @@ class ChatSession(Base):
     ai_summary = Column(Text, nullable=True)
     status = Column(String(20), default="READY")
     created_at = Column(DateTime, server_default=func.now())
+    recommended_questions = Column(JSON, nullable=True)
 
 class CoffeeChatReport(Base):
     """커피챗 종료 후 생성되는 AI 요약 리포트 리포지토리"""
