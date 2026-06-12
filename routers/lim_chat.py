@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from typing import Dict, List
-
+from models import SessionLocal, ChatSession
 from dotenv import load_dotenv
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from routers.pipeline import agent_regex_masking, agent_azure_pii, agent_llm_masking, agent_llm_summary
@@ -101,16 +101,27 @@ async def llm_assistant(
             if msg_type == "recommend_questions":
                 conversation = data.get("conversation", "")
                 preset_questions = data.get("preset_questions", "")
-                
+
                 if not llm_client:
+                    default_questions = [
+                        "현재 직무에서 가장 중요한 역량은 무엇인가요?",
+                        "처음 이 직무를 시작했을 때 어려웠던 점은?",
+                        "신입 지원자에게 해주고 싶은 조언이 있으신가요?"
+                    ]
                     await websocket.send_json({
                         "type": "recommended_questions",
-                        "questions": [
-                            "현재 직무에서 가장 중요한 역량은 무엇인가요?",
-                            "처음 이 직무를 시작했을 때 어려웠던 점은?",
-                            "신입 지원자에게 해주고 싶은 조언이 있으신가요?"
-                        ]
+                        "questions": default_questions
                     })
+                    session_db = SessionLocal()
+                    try:
+                        chat_session = session_db.query(ChatSession).filter(
+                            ChatSession.booking_id == booking_id
+                        ).first()
+                        if chat_session:
+                            chat_session.recommended_questions = default_questions
+                            session_db.commit()
+                    finally:
+                        session_db.close()
                     continue
 
                 try:
@@ -132,25 +143,47 @@ async def llm_assistant(
                         temperature=0.7,
                         max_tokens=300
                     )
-                    
+
                     import json as json_module
                     content = response.choices[0].message.content.strip()
                     questions = json_module.loads(content)
-                    
+
                     await websocket.send_json({
                         "type": "recommended_questions",
                         "questions": questions
                     })
-                    
+                    session_db = SessionLocal()
+                    try:
+                        chat_session = session_db.query(ChatSession).filter(
+                            ChatSession.booking_id == booking_id
+                        ).first()
+                        if chat_session:
+                            chat_session.recommended_questions = questions
+                            session_db.commit()
+                            logger.info(f"[추천질문] DB 저장 완료 booking_id={booking_id}")
+                    finally:
+                        session_db.close()
+
                 except Exception as e:
+                    default_questions = [
+                        "현재 직무에서 가장 중요한 역량은 무엇인가요?",
+                        "처음 이 직무를 시작했을 때 어려웠던 점은?",
+                        "신입 지원자에게 해주고 싶은 조언이 있으신가요?"
+                    ]
                     await websocket.send_json({
                         "type": "recommended_questions",
-                        "questions": [
-                            "현재 직무에서 가장 중요한 역량은 무엇인가요?",
-                            "처음 이 직무를 시작했을 때 어려웠던 점은?",
-                            "신입 지원자에게 해주고 싶은 조언이 있으신가요?"
-                        ]
+                        "questions": default_questions
                     })
+                    session_db = SessionLocal()
+                    try:
+                        chat_session = session_db.query(ChatSession).filter(
+                            ChatSession.booking_id == booking_id
+                        ).first()
+                        if chat_session:
+                            chat_session.recommended_questions = default_questions
+                            session_db.commit()
+                    finally:
+                        session_db.close()
                 continue
 
             if msg_type != "question":
@@ -225,6 +258,7 @@ async def llm_assistant(
     finally:
         logger.info(f"[LLM] 연결 해제 room={room_id} uid={user_id}")
 
+
 # ==========================================
 # 🚀 프론트에서 [종료] 버튼 누를 때 실행되는 AI 요약본 생성 API
 # ==========================================
@@ -258,7 +292,7 @@ async def generate_summary(chat_id: int):
         print(f"🚨 파이프라인 에러 발생: {e}")
         from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=f"요약본 생성 중 서버 에러: {str(e)}")
-    
+
 
 # ----------------------------------------ai추천질문----------------------------------------
 @router.post("/recommend-question")

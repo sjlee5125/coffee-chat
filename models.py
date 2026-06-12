@@ -3,7 +3,7 @@ import socket
 from datetime import datetime
 from sqlalchemy import (
     create_engine, Column, Integer, String, Boolean, Text,
-    Enum, DateTime, ForeignKey, Date, Boolean, func, UniqueConstraint
+    Enum, DateTime, ForeignKey, Date, Boolean, func, UniqueConstraint, JSON
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker,relationship
@@ -132,6 +132,7 @@ class ChatSession(Base):
     ai_summary = Column(Text, nullable=True)
     status = Column(String(20), default="READY")
     created_at = Column(DateTime, server_default=func.now())
+    recommended_questions = Column(JSON, nullable=True)
 
 class SavedMentor(Base):
     """멘티가 관심(찜)한 멘토 목록"""
