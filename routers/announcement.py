@@ -75,3 +75,29 @@ def delete_announcement(notice_id: int,
     db.delete(notice)
     db.commit()
     return {"message": "공지사항이 삭제되었습니다."}
+@router.get("/{notice_id}")
+def get_announcement_detail(notice_id: int, db: Session = Depends(get_db)):
+    notice = db.query(Announcement).filter(Announcement.id == notice_id).first()
+    if not notice:
+        raise HTTPException(status_code=404, detail="해당 공지사항을 찾을 수 없습니다.")
+    return notice
+
+# ==========================================
+# 5. 공지사항 수정 (관리자 전용)
+# ==========================================
+@router.put("/{notice_id}")
+def update_announcement(notice_id: int, request: AnnouncementCreate, 
+                        db: Session = Depends(get_db), 
+                        current_user: User = Depends(get_current_user)):
+    # 관리자 여부 체크
+    if current_user.role not in [UserRole.ADMIN, "ADMIN", "admin"]:
+        raise HTTPException(status_code=403, detail="관리자 전용 기능입니다.")
+    
+    notice = db.query(Announcement).filter(Announcement.id == notice_id).first()
+    if not notice:
+        raise HTTPException(status_code=404, detail="해당 공지사항을 찾을 수 없습니다.")
+        
+    notice.title = request.title
+    notice.content = request.content
+    db.commit()
+    return {"message": "공지사항이 성공적으로 수정되었습니다."}
