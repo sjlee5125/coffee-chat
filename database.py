@@ -2,6 +2,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import socket
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
 hostname = socket.gethostname()
 if hostname == "coffeechat":
     # 클라우드 서버 내부에서는 옆방 DB로 바로 접속 (localhost)
@@ -20,4 +22,3 @@ def get_db():
         yield db
     finally:
         db.close()
-        

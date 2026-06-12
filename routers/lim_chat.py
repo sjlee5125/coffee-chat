@@ -1,11 +1,21 @@
 import json
 import logging
 import os
-from typing import Dict, List
-
+from typing import Dict, List, Optional  # 💡 Optional 추가
+from models import SessionLocal, ChatSession
+from pydantic import BaseModel  # 💡 BaseModel 추가
 from dotenv import load_dotenv
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends  # 💡 Depends 추가
+from sqlalchemy.orm import Session  # 💡 Session 추가
+
+# 💡 DB 모델 및 의존성 추가 (models 파일에서 가져옴)
+from models import get_db, Booking, Mentor
+
 from routers.pipeline import agent_regex_masking, agent_azure_pii, agent_llm_masking, agent_llm_summary
+
+class RecommendQuestionRequest(BaseModel):
+    booking_id: int
+    stt_text: Optional[str] = ""
 
 
 load_dotenv()
@@ -91,7 +101,98 @@ async def llm_assistant(
             except json.JSONDecodeError:
                 continue
 
-            if data.get("type") != "question":
+            msg_type = data.get("type")
+
+            # 추천 질문 요청 처리
+            if msg_type == "recommend_questions":
+                conversation = data.get("conversation", "")
+                preset_questions = data.get("preset_questions", "")
+
+                if not llm_client:
+                    default_questions = [
+                        "현재 직무에서 가장 중요한 역량은 무엇인가요?",
+                        "처음 이 직무를 시작했을 때 어려웠던 점은?",
+                        "신입 지원자에게 해주고 싶은 조언이 있으신가요?"
+                    ]
+                    await websocket.send_json({
+                        "type": "recommended_questions",
+                        "questions": default_questions
+                    })
+                    session_db = SessionLocal()
+                    try:
+                        chat_session = session_db.query(ChatSession).filter(
+                            ChatSession.booking_id == booking_id
+                        ).first()
+                        if chat_session:
+                            chat_session.recommended_questions = default_questions
+                            session_db.commit()
+                    finally:
+                        session_db.close()
+                    continue
+
+                try:
+                    recommend_prompt = f"""커피챗 대화 내용:
+{conversation}
+
+멘티가 준비한 질문:
+{preset_questions}
+
+위 대화 흐름을 보고 멘티가 지금 물어보면 좋을 질문 3개를 JSON 배열로만 응답하세요.
+예시: ["질문1", "질문2", "질문3"]"""
+
+                    response = llm_client.chat.completions.create(
+                        model=AZURE_DEPLOYMENT_NAME,
+                        messages=[
+                            {"role": "system", "content": "당신은 커피챗 멘토링 어시스턴트입니다. JSON 배열로만 응답하세요."},
+                            {"role": "user", "content": recommend_prompt}
+                        ],
+                        temperature=0.7,
+                        max_tokens=300
+                    )
+
+                    import json as json_module
+                    content = response.choices[0].message.content.strip()
+                    questions = json_module.loads(content)
+
+                    await websocket.send_json({
+                        "type": "recommended_questions",
+                        "questions": questions
+                    })
+                    session_db = SessionLocal()
+                    try:
+                        chat_session = session_db.query(ChatSession).filter(
+                            ChatSession.booking_id == booking_id
+                        ).first()
+                        if chat_session:
+                            chat_session.recommended_questions = questions
+                            session_db.commit()
+                            logger.info(f"[추천질문] DB 저장 완료 booking_id={booking_id}")
+                    finally:
+                        session_db.close()
+
+                except Exception as e:
+                    default_questions = [
+                        "현재 직무에서 가장 중요한 역량은 무엇인가요?",
+                        "처음 이 직무를 시작했을 때 어려웠던 점은?",
+                        "신입 지원자에게 해주고 싶은 조언이 있으신가요?"
+                    ]
+                    await websocket.send_json({
+                        "type": "recommended_questions",
+                        "questions": default_questions
+                    })
+                    session_db = SessionLocal()
+                    try:
+                        chat_session = session_db.query(ChatSession).filter(
+                            ChatSession.booking_id == booking_id
+                        ).first()
+                        if chat_session:
+                            chat_session.recommended_questions = default_questions
+                            session_db.commit()
+                    finally:
+                        session_db.close()
+                continue
+
+            if msg_type != "question":
                 continue
 
             user_text = data.get("text", "").strip()
@@ -163,6 +264,7 @@ async def llm_assistant(
     finally:
         logger.info(f"[LLM] 연결 해제 room={room_id} uid={user_id}")
 
+
 # ==========================================
 # 🚀 프론트에서 [종료] 버튼 누를 때 실행되는 AI 요약본 생성 API
 # ==========================================
@@ -196,3 +298,60 @@ async def generate_summary(chat_id: int):
         print(f"🚨 파이프라인 에러 발생: {e}")
         from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=f"요약본 생성 중 서버 에러: {str(e)}")
+
+
+# ----------------------------------------ai추천질문----------------------------------------
+@router.post("/recommend-question")
+async def recommend_question(request: RecommendQuestionRequest, db: Session = Depends(get_db)):
+    print(f" [추천 질문 생성] booking_id={request.booking_id}")
+    
+    # 1. 예약 정보 가져오기 (멘티 질문지, 멘토 직무)
+    booking = db.query(Booking).filter(Booking.id == request.booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="예약 정보 없음")
+    
+    mentor = db.query(Mentor).filter(Mentor.id == booking.mentor_id).first()
+    mentor_job = mentor.job_title if mentor else "현직자"
+    mentee_questions = booking.questions or ""
+
+    # 2. 프롬프트 구성
+    system_prompt = """당신은 커피챗 멘토링 어시스턴트입니다.
+멘티가 멘토에게 물어볼 수 있는 좋은 질문 3개를 추천해주세요.
+반드시 JSON 배열 형태로만 응답하세요.
+예시: ["질문1", "질문2", "질문3"]"""
+
+    user_prompt = f"""멘토 직무: {mentor_job}
+멘티가 준비한 질문: {mentee_questions}
+지금까지 나눈 대화: {request.stt_text or '아직 대화 없음'}
+
+위 내용을 바탕으로 지금 이 순간 멘티가 물어보면 좋을 질문 3개를 추천해주세요."""
+
+    # 3. Azure OpenAI 호출
+    try:
+        from routers.ai_service import client, DEPLOYMENT_NAME
+        if not client:
+            return {"questions": ["멘토님의 커리어 전환 계기가 궁금해요!", "현재 직무에서 가장 중요한 역량은 무엇인가요?", "신입으로서 준비해야 할 것들이 있을까요?"]}
+        
+        response = client.chat.completions.create(
+            model=DEPLOYMENT_NAME,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.7,
+            max_tokens=500
+        )
+        
+        import json
+        content = response.choices[0].message.content.strip()
+        questions = json.loads(content)
+        return {"questions": questions}
+        
+    except Exception as e:
+        print(f" [추천 질문 생성 실패]: {e}")
+        # 기본 질문 반환
+        return {"questions": [
+            f"{mentor_job} 직무에서 가장 중요한 역량은 무엇인가요?",
+            "처음 이 직무를 시작했을 때 가장 어려웠던 점은 무엇인가요?",
+            "신입 지원자에게 해주고 싶은 조언이 있으신가요?"
+        ]}

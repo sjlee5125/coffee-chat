@@ -58,6 +58,11 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
         "id": user.id,
         "email": user.email,
         "name": user.name,
+        
+        # 💡 [핵심 추가] 프론트엔드 공지사항에서 권한 체크를 할 수 있도록 role을 명시해줍니다!
+        # Enum 타입일 경우 문자열 값(.value)을 추출하도록 안전하게 처리합니다.
+        "role": user.role.value if hasattr(user.role, "value") else str(user.role),
+        
         "bio": user.bio or "",
         "mbti": user.mbti or "",
         "hashtags": user.hashtags or "",
@@ -69,7 +74,7 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
         "profile_image": user.profile_image or "",
         "phone_number": user.phone_number or "", 
         
-        # 🌟 [추가됨] 프론트엔드로 직무 정보 보내주기
+        # 🌟 프론트엔드로 직무 정보 보내주기
         "main_category": getattr(mentor, "main_category", "") if mentor else "",
         "sub_category": getattr(mentor, "sub_category", "") if mentor else "",
         "status": getattr(mentor, "status", "") if mentor else "",
@@ -85,7 +90,6 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
         
         "is_mentor": is_mentor
     }
-
 @router.post("/{user_id}/profile-image")
 async def upload_profile_image(
     user_id: int, 

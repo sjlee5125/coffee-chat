@@ -31,7 +31,7 @@ Base = declarative_base()
 class UserRole(enum.Enum):
     MENTOR = "mentor"
     MENTEE = "mentee"
-
+    ADMIN = "admin"
 
 class User(Base):
     __tablename__ = "users"
@@ -132,6 +132,7 @@ class ChatSession(Base):
     ai_summary = Column(Text, nullable=True)
     status = Column(String(20), default="READY")
     created_at = Column(DateTime, server_default=func.now())
+    recommended_questions = Column(JSON, nullable=True)
 
 class CoffeeChatReport(Base):
     """커피챗 종료 후 생성되는 AI 요약 리포트 리포지토리"""
@@ -170,6 +171,18 @@ class SavedMentor(Base):
     user_id    = Column(Integer, nullable=False, index=True)   # 찜한 사람 (users.id)
     mentor_id  = Column(Integer, nullable=False, index=True)   # 찜 대상  (mentors.id)
     created_at = Column(DateTime, server_default=func.now())
+
+class Announcement(Base):
+    __tablename__ = "announcements"
+    __table_args__ = {'schema': 'public'}
+    
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(255), nullable=False)
+    content = Column(Text, nullable=False)
+    # 관리자 작성자 ID (관리자만 작성할 수 있으므로 참조)
+    author_id = Column(Integer, ForeignKey("public.users.id"), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
     
 
 # ─── 3. DB 헬퍼 및 제너레이터 ───
