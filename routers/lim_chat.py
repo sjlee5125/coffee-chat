@@ -131,14 +131,16 @@ async def llm_assistant(
                     continue
 
                 try:
-                    recommend_prompt = f"""커피챗 대화 내용:
-{conversation}
+                    recommend_prompt = f"""멘티가 사전에 준비한 질문 목록:
+                    {preset_questions if preset_questions else '없음'}
 
-멘티가 준비한 질문:
-{preset_questions}
+                    지금까지 나눈 대화 내용:
+                    {conversation if conversation else '아직 대화 없음'}
 
-위 대화 흐름을 보고 멘티가 지금 물어보면 좋을 질문 3개를 JSON 배열로만 응답하세요.
-예시: ["질문1", "질문2", "질문3"]"""
+                    위 두 가지를 모두 참고해서 지금 이 순간 멘티가 물어보면 가장 좋을 질문 3개를 추천해주세요.
+                    사전 질문 중 아직 안 한 것 위주로, 대화 흐름에 맞게 골라주세요.
+                    반드시 JSON 배열로만 응답하세요.
+                    예시: ["질문1", "질문2", "질문3"]"""
 
                     response = llm_client.chat.completions.create(
                         model=AZURE_DEPLOYMENT_NAME,
@@ -164,7 +166,10 @@ async def llm_assistant(
                             ChatSession.booking_id == booking_id
                         ).first()
                         if chat_session:
-                            chat_session.recommended_questions = questions
+                            existing = chat_session.recommended_questions or []
+                            chat_session.recommended_questions = existing + questions
+                            from sqlalchemy.orm.attributes import flag_modified
+                            flag_modified(chat_session, "recommended_questions")
                             session_db.commit()
                             logger.info(f"[추천질문] DB 저장 완료 booking_id={booking_id}")
                     finally:

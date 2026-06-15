@@ -16,7 +16,7 @@ from openai import AzureOpenAI
 from auth import router
 from models import User, Mentor, Booking, MentorAvailability, ChatSession, get_db, create_tables
 import auth
-from routers import users, mentors, bookings, ai, notifications, chat, chat_router, webrtc, stt, lim_chat, pipeline, general_chat, announcement
+from routers import users, mentors, bookings, ai, notifications, chat, chat_router, webrtc, stt, lim_chat, pipeline, general_chat, announcement, chatbot
 from routers.dashboard_router import router as dashboard_router_obj
 
 # 서버 실행 시 시스템의 .env 환경변수를 로드
@@ -72,6 +72,7 @@ app.include_router(lim_chat.router)
 app.include_router(dashboard_router_obj)
 #app.include_router(pipeline.router)
 app.include_router(announcement.router)
+app.include_router(chatbot.router, prefix="/api", tags=["Chatbot"])# 💡 [CORS 설정]
 
 @app.get("/")
 def root():
