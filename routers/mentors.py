@@ -21,7 +21,12 @@ async def get_recommended_mentors(user_id: int, db: Session = Depends(get_db)):
 
         scored_mentors = []
         for user, m_info in results:
-            score, reasons = calc_match_score(current_user, user) if current_user else (0, [])
+            # 🌟 [추천 로직 강화]
+            # 멘티(current_user)의 "주요 이력 및 경력(experience)",
+            # "도움을 줄 수 있는 분야(help_provide)", "배우고 싶은 분야(help_receive)"를
+            # 멘토의 프로필(m_info: mentoring_topics/career_history/job_title 등)과
+            # 함께 비교할 수 있도록 m_info(Mentor)를 같이 전달합니다.
+            score, reasons = calc_match_score(current_user, user, m_info) if current_user else (0, [])
             
             # User 테이블에서 help_provide 데이터를 리스트로 파싱합니다.
             tech_stack = []
