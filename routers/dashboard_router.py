@@ -102,7 +102,7 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
         {
             "mentee_name": row.name,
             "rating": row.rating,
-            "content": row.content, # 💡 2. 빈칸("") 대신 DB에서 가져온 값을 넣어줍니다.
+            "content": row.review, # 💡 2. 빈칸("") 대신 DB에서 가져온 값을 넣어줍니다.
             "created_at": row.created_at.isoformat() if row.created_at else None,
         }
         for row in review_rows
