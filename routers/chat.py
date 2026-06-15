@@ -142,7 +142,7 @@ def create_review(request: ReviewCreateRequest, db: Session = Depends(get_db)):
 
 
 # ==========================================
-# 5. AI 요약본 생성 API (문법 에러 수정 완료 ✨)
+# 5. AI 요약본 생성 API (마스킹 내역 & 매핑 데이터 저장 반영 ✨)
 # ==========================================
 @router.post("/api/chat-session/{chat_id}/generate-summary")
 async def generate_summary(chat_id: int, request: Request, db: Session = Depends(get_db)): 
@@ -159,19 +159,23 @@ async def generate_summary(chat_id: int, request: Request, db: Session = Depends
     try:
         from routers.pipeline import agent_regex_masking, agent_azure_pii, agent_llm_masking, agent_llm_summary
         
+        # 1. 3단계 마스킹 파이프라인 가동 (비식별화 문장 확보)
         step0_text = agent_regex_masking(raw_text)
         step1_text = agent_azure_pii(step0_text)
-        step2_text = agent_llm_masking(step1_text)
+        step2_text = agent_llm_masking(step1_text)  # 🔒 마스킹 완료된 전체 대화 내역
+        
+        # 2. 안전한 문장을 프롬프트에 주입하여 구조화된 JSON 데이터 획득
         final_json_str = agent_llm_summary(step2_text)
 
-        # ✨ [수정 완료] 한 줄로 깔끔하게 replace를 체이닝하여 SyntaxError를 해결했습니다.
         final_json_str = final_json_str.replace("```json", "").replace("```", "").strip()
-        parsed = json.loads(final_json_str)
+        parsed = json.loads(final_json_str)  # 📊 구조화된 매핑 데이터 (파이썬 딕셔너리 상태)
 
+        # 로컬 파일 백업 (기존 로직 유지)
         os.makedirs("summary_data", exist_ok=True)
         with open(f"summary_data/{chat_id}.json", "w", encoding="utf-8") as f:
             json.dump(parsed, f, ensure_ascii=False)
 
+        # 3. 매핑 데이터에서 핵심 정보들을 조립하여 줄글 요약본 생성
         meta = parsed.get("session_metadata", {})
         agendas = parsed.get("core_agendas", [])
         consensus = parsed.get("session_consensus", "내용 없음")
@@ -186,16 +190,19 @@ async def generate_summary(chat_id: int, request: Request, db: Session = Depends
             pretty_text += f"- 호스트 해결책: {a.get('host_solution', '')}\n\n"
         pretty_text += f"3. 최종 합의점 및 결론\n{consensus}"
 
+        # 4. 데이터베이스 매핑 및 저장
         if session:
             session.ai_summary = pretty_text  
             
             report = db.query(CoffeeChatReport).filter(CoffeeChatReport.chatsession_id == session.id).first()
             if report:
-                report.summary = pretty_text
+                report.summary = pretty_text       # 줄글 요약본 저장
+                report.stt_masked = step2_text     # ✅ [추가] 마스킹된 전체 대화 내역 저장
+                report.masking_map = parsed        # ✅ [추가] 구조화된 매핑 데이터 JSON 객체 그대로 저장
                 
-            db.commit()
+            db.commit()  # 🚀 최종 영구 반영
         
-        return {"message": "요약본 생성 성공", "ai_summary": pretty_text}
+        return {"message": "요약본 및 마스킹 데이터 저장 성공", "ai_summary": pretty_text}
 
     except Exception as e:
         print(f"🚨 파이프라인 에러 발생: {e}")

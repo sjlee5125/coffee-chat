@@ -1,196 +1,229 @@
-# routers/matching.py
+"""
+멘토 추천 매칭 알고리즘
+─────────────────────────────────────────────────────────────
+멘티(현재 로그인한 사용자, current_user)의 프로필 정보와
+멘토(mentor_user / mentor_profile)의 프로필 정보를 비교해
+얼마나 잘 맞는지(match_score)와 그 이유(reasons)를 계산합니다.
+
+매칭에 사용하는 멘티 측 정보 (User 테이블)
+  - help_receive  : "배우고 싶은 분야"            → 가중치 가장 높음
+  - experience    : "주요 이력 및 경력 사항"       → 비슷한 배경 매칭
+  - help_provide  : "내가 확실히 도움을 줄 수 있는 분야" → 상호 교환형 매칭
+  - hashtags      : 관심 키워드 (보너스)
+
+매칭에 사용하는 멘토 측 정보
+  - Mentor.mentoring_topics / job_title / main_category / sub_category / mentor_intro
+  - Mentor.career_history / detailed_experience
+  - User(mentor).help_provide / help_receive / hashtags
+
+단순 완전 일치뿐 아니라, 한쪽 키워드가 다른쪽 키워드에 "부분 문자열"로
+포함되는 경우도 매칭으로 인정해서 최대한 많은 항목이 매칭되도록 합니다.
+(예: 내가 적은 "백엔드"가 멘토의 "백엔드 개발자" 안에 포함되는 경우)
+"""
 
 import json
 import re
 
 
-def get_value(obj, field, default=None):
-    """SQLAlchemy 객체/딕셔너리에서 안전하게 값 꺼내기"""
-    if obj is None:
-        return default
+# ── 내부 유틸 함수들 ────────────────────────────────────────────────
 
-    if isinstance(obj, dict):
-        return obj.get(field, default)
-
-    return getattr(obj, field, default)
-
-
-def parse_field(data):
-    if not data:
+def _safe_json_list(value):
+    """JSON 배열 문자열을 파싱합니다. 실패하거나 배열이 아니면 적절히 보정합니다."""
+    if not value:
         return []
-
-    if isinstance(data, list):
-        return [str(s).strip().lower() for s in data if s]
-
-    if isinstance(data, str):
-        try:
-            parsed = json.loads(data)
-            if isinstance(parsed, list):
-                return [str(s).strip().lower() for s in parsed if s]
-            return [str(parsed).strip().lower()]
-        except Exception:
-            return [s.strip().lower() for s in re.split(r"[,\s]+", data) if s.strip()]
-
-    return [str(data).strip().lower()]
+    if isinstance(value, list):
+        return value
+    try:
+        parsed = json.loads(value)
+        if isinstance(parsed, list):
+            return parsed
+        if isinstance(parsed, dict):
+            return [parsed]
+        return [parsed]
+    except (json.JSONDecodeError, TypeError):
+        return [value]
 
 
-def parse_experience_texts(data):
-    if not data:
-        return []
-
-    if isinstance(data, str):
-        try:
-            data = json.loads(data)
-        except Exception:
-            return [data.lower()]
-
-    if isinstance(data, list):
-        texts = []
-        for item in data:
-            if isinstance(item, dict):
-                texts.append(str(item.get("text", "")).lower())
-            else:
-                texts.append(str(item).lower())
-        return texts
-
-    return []
+def _flatten_to_text(value):
+    """문자열/딕셔너리/리스트 등 어떤 구조든 검색 가능한 하나의 텍스트로 합칩니다."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return " ".join(_flatten_to_text(v) for v in value.values())
+    if isinstance(value, (list, tuple)):
+        return " ".join(_flatten_to_text(v) for v in value)
+    return str(value)
 
 
-def tokenize(text):
-    if not text:
-        return set()
-
-    # 한글, 영어, 숫자 토큰 추출
-    return set(re.findall(r"[가-힣a-zA-Z0-9]+", str(text).lower()))
+# 한글/영문/숫자/+,# 등으로 이루어진 2글자 이상 토큰만 의미있는 키워드로 인정
+_TOKEN_RE = re.compile(r"[가-힣A-Za-z0-9+#.]{2,}")
 
 
-def calc_match_score(user, mentor, mentor_user=None):
+def _extract_keywords(*raw_values):
+    """
+    여러 소스(콤마로 구분된 태그 문자열, JSON 배열 문자열, 자유 서술형 텍스트 등)에서
+    중복 제거된 키워드 집합을 추출합니다.
+    """
+    keywords = set()
+
+    for raw in raw_values:
+        if not raw:
+            continue
+
+        # 1) JSON 배열 형태("[...]")로 저장된 필드는 먼저 펼쳐서 처리
+        if isinstance(raw, str) and raw.strip().startswith("["):
+            for item in _safe_json_list(raw):
+                text = _flatten_to_text(item)
+                for token in _TOKEN_RE.findall(text):
+                    keywords.add(token.lower())
+            continue
+
+        text = _flatten_to_text(raw)
+
+        # 2) 콤마/슬래시/세미콜론/줄바꿈 등으로 구분된 "태그형" 표현 우선 처리
+        for chunk in re.split(r"[,/;\n]", text):
+            chunk = chunk.strip()
+            if chunk:
+                keywords.add(chunk.lower())
+
+        # 3) 자유 서술형 텍스트에서도 단어 단위 토큰을 추출 (부분 매칭용)
+        for token in _TOKEN_RE.findall(text):
+            keywords.add(token.lower())
+
+    return keywords
+
+
+def _overlap(set_a, set_b):
+    """
+    두 키워드 집합 사이의 교집합을 구합니다.
+    완전히 같은 단어뿐 아니라, 한쪽이 다른쪽의 부분 문자열인 경우도
+    매칭으로 인정해서(예: "백엔드" ⊂ "백엔드개발자") 최대한 많은 항목을 찾아냅니다.
+    """
+    matched = set()
+    if not set_a or not set_b:
+        return matched
+
+    for a in set_a:
+        if not a:
+            continue
+        for b in set_b:
+            if not b:
+                continue
+            if a == b or (a in b) or (b in a):
+                # 더 짧은(=더 구체적인 일반 키워드) 쪽을 표시 키워드로 사용
+                matched.add(a if len(a) <= len(b) else b)
+                break
+
+    return matched
+
+
+# ── 매칭 점수 계산 ───────────────────────────────────────────────────
+
+def calc_match_score(current_user, mentor_user, mentor_profile=None):
+    """
+    현재 사용자(current_user)와 멘토(mentor_user / mentor_profile)의
+    프로필을 비교해 매칭 점수(score)와 매칭 이유 목록(reasons)을 반환합니다.
+
+    Parameters
+    ----------
+    current_user : models.User
+        추천을 받는 멘티(나) 정보
+    mentor_user : models.User
+        멘토의 User 레코드 (help_provide / help_receive / hashtags 등)
+    mentor_profile : models.Mentor | None
+        멘토의 Mentor 레코드 (mentoring_topics / career_history 등).
+        라우터에서 (User, Mentor) JOIN 결과로 함께 들고 있으므로 그대로 전달하면 됩니다.
+
+    Returns
+    -------
+    (score: int, reasons: list[str])
+    """
+
+    if current_user is None or mentor_user is None:
+        return 0, []
+
     score = 0
-    match_reasons = []
+    reasons = []
 
-    # user는 현재 로그인한 사용자(User)
-    user_help_receive = parse_field(get_value(user, "help_receive", ""))
-    user_hashtags = parse_field(get_value(user, "hashtags", ""))
-    user_experience = parse_field(get_value(user, "experience", ""))
-    user_help_provide = parse_field(get_value(user, "help_provide", ""))
-
-    # User 테이블에 main_category/sub_category가 없을 수 있으므로 안전하게 처리
-    user_main_cat = str(get_value(user, "main_category", "") or "").lower()
-    user_sub_cat = str(get_value(user, "sub_category", "") or "").lower()
-    user_bio_tokens = tokenize(get_value(user, "bio", "") or "")
-    user_mbti = str(get_value(user, "mbti", "") or "").upper()
-
-    # mentor는 Mentor 객체
-    mentor_keywords = parse_field(
-        get_value(mentor, "mentor_keywords", None)
-        or get_value(mentor, "mentoring_topics", "")
+    # ── 1. 멘티(나)가 가진 정보 ─────────────────────────────────────
+    my_learn_kw = _extract_keywords(
+        getattr(current_user, "help_receive", None),   # 배우고 싶은 분야
     )
-    mentor_topics = parse_field(get_value(mentor, "mentoring_topics", ""))
-    mentor_exp_texts = parse_experience_texts(get_value(mentor, "detailed_experience", ""))
-    mentor_career = parse_field(get_value(mentor, "career_history", ""))
+    my_provide_kw = _extract_keywords(
+        getattr(current_user, "help_provide", None),   # 내가 확실히 도움을 줄 수 있는 분야
+    )
+    my_experience_kw = _extract_keywords(
+        getattr(current_user, "experience", None),      # 주요 이력 및 경력 사항
+    )
+    my_hashtag_kw = _extract_keywords(
+        getattr(current_user, "hashtags", None),
+    )
 
-    mentor_main_cat = str(get_value(mentor, "main_category", "") or "").lower()
-    mentor_sub_cat = str(get_value(mentor, "sub_category", "") or "").lower()
-    mentor_intro = get_value(mentor, "mentor_intro", "") or ""
+    # ── 2. 멘토 쪽 정보 ─────────────────────────────────────────────
+    mentor_topic_kw = _extract_keywords(
+        getattr(mentor_profile, "mentoring_topics", None) if mentor_profile else None,
+        getattr(mentor_profile, "job_title", None) if mentor_profile else None,
+        getattr(mentor_profile, "main_category", None) if mentor_profile else None,
+        getattr(mentor_profile, "sub_category", None) if mentor_profile else None,
+        getattr(mentor_profile, "mentor_intro", None) if mentor_profile else None,
+    )
+    mentor_career_kw = _extract_keywords(
+        getattr(mentor_profile, "career_history", None) if mentor_profile else None,
+        getattr(mentor_profile, "detailed_experience", None) if mentor_profile else None,
+        getattr(mentor_profile, "job_title", None) if mentor_profile else None,
+        getattr(mentor_profile, "main_category", None) if mentor_profile else None,
+        getattr(mentor_profile, "sub_category", None) if mentor_profile else None,
+    )
+    mentor_provide_kw = _extract_keywords(
+        getattr(mentor_user, "help_provide", None),
+    )
+    mentor_receive_kw = _extract_keywords(
+        getattr(mentor_user, "help_receive", None),
+    )
+    mentor_hashtag_kw = _extract_keywords(
+        getattr(mentor_user, "hashtags", None),
+    )
 
-    # mentor_user는 멘토의 User 객체. 해시태그/자기소개/MBTI 등이 User에 있을 수 있음
-    mentor_hashtags = parse_field(get_value(mentor_user, "hashtags", ""))
-    mentor_user_bio = get_value(mentor_user, "bio", "") or ""
-    mentor_bio_tokens = tokenize(mentor_user_bio or mentor_intro)
-    mentor_mbti = str(get_value(mentor_user, "mbti", "") or "").upper()
-    mentor_story_tokens = tokenize(mentor_intro)
+    # ── 3. 항목별 매칭 & 점수 부여 ──────────────────────────────────
 
-    # 1. 사용자가 받고 싶은 도움과 멘토 키워드 매칭 +15
-    for kw in user_help_receive:
-        if any(kw in mk or mk in kw for mk in mentor_keywords):
-            score += 15
-            match_reasons.append(f"관심 키워드 일치: {kw}")
+    # (1) 내가 배우고 싶은 분야 ↔ 멘토의 전문분야 / 경력 / 소개 / 제공 가능한 도움
+    #     → 가장 핵심적인 매칭이므로 가중치를 가장 높게 설정
+    learn_match = _overlap(
+        my_learn_kw,
+        mentor_topic_kw | mentor_career_kw | mentor_provide_kw,
+    )
+    if learn_match:
+        score += 40 * len(learn_match)
+        reasons.append(
+            f"배우고 싶은 분야({', '.join(sorted(learn_match)[:3])})와 멘토의 전문 분야가 잘 맞아요"
+        )
 
-    # 2. 사용자가 받고 싶은 도움과 멘토링 주제 매칭 +12
-    for kw in user_help_receive:
-        if any(kw in mt or mt in kw for mt in mentor_topics):
-            score += 12
-            match_reasons.append(f"멘토링 주제 일치: {kw}")
+    # (2) 내 경력/이력 ↔ 멘토의 경력 / 직무 / 카테고리
+    #     → 비슷한 커리어 배경을 가진 멘토를 우선 추천
+    career_match = _overlap(my_experience_kw, mentor_career_kw)
+    if career_match:
+        score += 20 * len(career_match)
+        reasons.append(
+            f"경력 분야({', '.join(sorted(career_match)[:3])})가 비슷해 공감대를 형성하기 좋아요"
+        )
 
-    # 3. 사용자가 받고 싶은 도움과 멘토 상세 경험 매칭 +10
-    for kw in user_help_receive:
-        kw_tokens = tokenize(kw)
-        for exp_text in mentor_exp_texts:
-            overlap = kw_tokens & tokenize(exp_text)
-            if overlap:
-                score += 10
-                match_reasons.append(f"관련 경험 일치: {', '.join(list(overlap)[:3])}")
-                break
+    # (3) 내가 도움을 줄 수 있는 분야 ↔ 멘토가 도움 받고 싶어하는 분야
+    #     → 서로 주고받을 수 있는 "상호 교환형" 매칭
+    mutual_match = _overlap(my_provide_kw, mentor_receive_kw)
+    if mutual_match:
+        score += 15 * len(mutual_match)
+        reasons.append(
+            f"내가 도움을 줄 수 있는 분야({', '.join(sorted(mutual_match)[:3])})를 멘토님도 필요로 해요"
+        )
 
-    # 4. 직무 카테고리 일치 +10 / 세부 직무 일치 +7
-    if user_main_cat and mentor_main_cat and user_main_cat == mentor_main_cat:
-        score += 10
-        match_reasons.append(f"직무 카테고리 일치: {user_main_cat}")
+    # (4) 해시태그 / 관심 키워드 겹침 → 보너스 점수
+    hashtag_match = _overlap(my_hashtag_kw, mentor_hashtag_kw | mentor_topic_kw)
+    if hashtag_match:
+        score += 5 * len(hashtag_match)
+        reasons.append(
+            f"공통 관심 키워드({', '.join(sorted(hashtag_match)[:3])})가 있어요"
+        )
 
-    if user_sub_cat and mentor_sub_cat and user_sub_cat == mentor_sub_cat:
-        score += 7
-        match_reasons.append(f"세부 직무 일치: {user_sub_cat}")
-
-    # 5. 해시태그 겹침 +8
-    tag_overlap = set(user_hashtags) & set(mentor_hashtags)
-    if tag_overlap:
-        score += len(tag_overlap) * 8
-        match_reasons.append(f"해시태그 일치: {', '.join(list(tag_overlap)[:3])}")
-
-    # 6. 사용자가 받고 싶은 도움과 멘토 경력 매칭 +6
-    for kw in user_help_receive:
-        kw_tokens = tokenize(kw)
-        for career in mentor_career:
-            if kw_tokens & tokenize(career):
-                score += 6
-                match_reasons.append(f"관련 경력 일치: {kw}")
-                break
-
-    # 7. 사용자 해시태그와 멘토 키워드/주제 매칭 +5
-    for tag in user_hashtags:
-        if any(tag in mk or mk in tag for mk in mentor_keywords + mentor_topics):
-            score += 5
-            match_reasons.append(f"해시태그-키워드 일치: {tag}")
-
-    # 8. 사용자 경험과 멘토 키워드 매칭 +4
-    for exp in user_experience:
-        exp_tokens = tokenize(exp)
-        for mk in mentor_keywords + mentor_topics:
-            if exp_tokens & tokenize(mk):
-                score += 4
-                match_reasons.append(f"경험-키워드 일치: {exp}")
-                break
-
-    # 9. 자기소개 토큰 겹침 +3, 최대 15점
-    meaningful = {t for t in (user_bio_tokens & mentor_bio_tokens) if len(t) >= 2}
-    if meaningful:
-        score += min(len(meaningful) * 3, 15)
-        match_reasons.append(f"자기소개 유사: {', '.join(list(meaningful)[:3])}")
-
-    # 10. 사용자가 제공 가능한 도움과 멘토 해시태그 매칭 +3
-    for hp in user_help_provide:
-        hp_tokens = tokenize(hp)
-        for mh in mentor_hashtags:
-            if hp_tokens & tokenize(mh):
-                score += 3
-                match_reasons.append(f"제공 분야 일치: {hp}")
-                break
-
-    # 11. MBTI 일치 +2
-    if user_mbti and mentor_mbti and user_mbti == mentor_mbti:
-        score += 2
-        match_reasons.append(f"MBTI 일치: {user_mbti}")
-
-    # 12. 사용자가 받고 싶은 도움과 멘토 소개글 매칭 +2
-    for kw in user_help_receive:
-        if tokenize(kw) & mentor_story_tokens:
-            score += 2
-            match_reasons.append(f"멘토 소개글 관련: {kw}")
-
-    # 같은 이유가 너무 많이 중복되지 않게 정리
-    unique_reasons = []
-    for reason in match_reasons:
-        if reason not in unique_reasons:
-            unique_reasons.append(reason)
-
-    return score, unique_reasons
+    return score, reasons

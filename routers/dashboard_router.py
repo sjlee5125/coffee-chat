@@ -31,7 +31,7 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
         db.query(func.count(Booking.id))
         .filter(
             Booking.mentor_id == mentor.id,
-            Booking.status == "PAID",
+            Booking.status.in_(["PAID", "CONFIRMED"]), # 확정/결제 완료 모두 집계
             Booking.booking_date >= this_month_start,
         )
         .scalar() or 0
@@ -62,7 +62,6 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
     )
     rebooking_rate = round((rebooking_users / total_users * 100), 1) if total_users else 0.0
 
-    # 💡 [수정됨] 멘토 대시보드: 오늘 지나간 시간을 걸러내는 필터 추가
     now_dt = datetime.now()
     current_time_str = now_dt.strftime("%H:%M:%S")
 
@@ -71,7 +70,7 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
         .join(User, User.id == Booking.user_id)
         .filter(
             Booking.mentor_id == mentor.id,
-            Booking.status == "PAID",
+            Booking.status.in_(["PAID", "CONFIRMED"]), # 💡 PENDING은 제외
             (Booking.booking_date > today) | 
             ((Booking.booking_date == today) & (Booking.booking_time >= current_time_str))
         )
@@ -103,7 +102,7 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
         {
             "mentee_name": row.name,
             "rating": row.rating,
-            "content": "", # 내용 없음
+            "content": "", 
             "created_at": row.created_at.isoformat() if row.created_at else None,
         }
         for row in review_rows
@@ -112,7 +111,7 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
     return {
         "stats": {
             "name": user.name if user else mentor.name,
-            "monthly_earnings": monthly_earnings,
+            "monthly_earnings": monthly_earnings, # 💡 프론트엔드가 요구하는 키값
             "monthly_session_count": monthly_bookings_count,
             "average_rating": average_rating,
             "mentoring_hours": mentoring_hours,
@@ -123,6 +122,9 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
     }
 
 
+# ════════════════════════════════════════════════════════════════
+#  멘티 대시보드
+# ════════════════════════════════════════════════════════════════
 @router.get("/mentee/dashboard/{user_id}")
 def mentee_dashboard(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
@@ -131,8 +133,13 @@ def mentee_dashboard(user_id: int, db: Session = Depends(get_db)):
 
     today = date.today()
 
-    total_chats = db.query(func.count(Booking.id)).filter(Booking.user_id == user_id, Booking.status == "PAID").scalar() or 0
+    # 1. 참여한 커피챗 (COMPLETED 포함)
+    total_chats = db.query(func.count(Booking.id)).filter(
+        Booking.user_id == user_id, 
+        Booking.status.in_(["PAID", "CONFIRMED", "COMPLETED"])
+    ).scalar() or 0
 
+    # 2. 총 학습 시간 계산
     total_seconds = (
         db.query(
             func.sum(
@@ -143,17 +150,28 @@ def mentee_dashboard(user_id: int, db: Session = Depends(get_db)):
         .scalar() or 0
     )
     learning_hours = round(total_seconds / 3600, 1)
+
+    # 💡 3. 수락 대기(PENDING, PAID 등 미확정) 건수
+    pending_requests = db.query(func.count(Booking.id)).filter(
+        Booking.user_id == user_id, 
+        Booking.status.in_(["PENDING", "PAID"]) # 확정 전 상태를 모두 대기로 간주
+    ).scalar() or 0
+
+    # 💡 4. 작성한 후기 수
+    written_reviews = db.query(func.count(Review.id)).filter(
+        Review.user_id == user_id
+    ).scalar() or 0
     
-    # 💡 [수정됨] 멘티 대시보드: Mentor 정보 조인 및 user_id 기준 필터링으로 정상화
     now_dt = datetime.now()
     current_time_str = now_dt.strftime("%H:%M:%S")
     
+    # 5. 다가오는 예약
     upcoming_rows = (
         db.query(Booking.id, Booking.booking_date, Booking.booking_time, Booking.status, Mentor.name)
-        .join(Mentor, Mentor.id == Booking.mentor_id) # User가 아니라 Mentor와 조인
+        .join(Mentor, Mentor.id == Booking.mentor_id) 
         .filter(
-            Booking.user_id == user_id, # mentor.id가 아니라 user_id로 조회!
-            Booking.status == "PAID",
+            Booking.user_id == user_id, 
+            Booking.status.in_(["PAID", "CONFIRMED"]), # 승인 대기 또는 확정
             (Booking.booking_date > today) | 
             ((Booking.booking_date == today) & (Booking.booking_time >= current_time_str))
         )
@@ -171,8 +189,9 @@ def mentee_dashboard(user_id: int, db: Session = Depends(get_db)):
         for row in upcoming_rows
     ]
 
+    # 6. 최근 만난 멘토 (과거 예약 기준)
     history_rows = (
-        db.query(Booking.booking_date, Mentor.id, Mentor.name, Mentor.mentoring_topics, Review.rating)
+        db.query(Booking.booking_date, Mentor.id, Mentor.name, Mentor.job_title, Review.rating)
         .select_from(Booking)
         .join(Mentor, Mentor.id == Booking.mentor_id)
         .outerjoin(
@@ -181,8 +200,8 @@ def mentee_dashboard(user_id: int, db: Session = Depends(get_db)):
         )
         .filter(
             Booking.user_id == user_id,
-            Booking.booking_date < today,
-            Booking.status == "PAID",
+            Booking.booking_date <= today,
+            Booking.status.in_(["PAID", "CONFIRMED", "COMPLETED"])
         )
         .order_by(Booking.booking_date.desc())
         .limit(20)
@@ -191,25 +210,28 @@ def mentee_dashboard(user_id: int, db: Session = Depends(get_db)):
 
     seen_mentor_ids = set()
     mentor_history = []
-    for booking_date, m_id, m_name, m_topics, r_rating in history_rows:
+    for booking_date, m_id, m_name, m_job, r_rating in history_rows:
         if m_id in seen_mentor_ids:
             continue
         seen_mentor_ids.add(m_id)
         mentor_history.append({
             "mentor_id": m_id,
             "mentor_name": m_name,
-            "topic": m_topics.split("\n")[0] if m_topics else None,
+            "topic": m_job or "커피챗 멘토", # 💡 DB에 job_title이 있으면 그것을, 없으면 기본값
             "date": booking_date.isoformat() if booking_date else None,
             "my_rating": r_rating,
         })
         if len(mentor_history) >= 5:
             break
 
+    # 최종 결과 반환
     return {
         "stats": {
             "name": user.name,
             "total_chats": total_chats,
             "learning_hours": learning_hours,
+            "pending_requests": pending_requests, # 💡 프론트엔드와 맞춘 키
+            "written_reviews": written_reviews,   # 💡 프론트엔드와 맞춘 키
         },
         "upcoming_bookings": upcoming_bookings,
         "mentor_history": mentor_history,
