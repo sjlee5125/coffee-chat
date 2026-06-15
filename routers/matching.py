@@ -60,6 +60,21 @@ def _flatten_to_text(value):
 # 한글/영문/숫자/+,# 등으로 이루어진 2글자 이상 토큰만 의미있는 키워드로 인정
 _TOKEN_RE = re.compile(r"[가-힣A-Za-z0-9+#.]{2,}")
 
+# 키워드로 인정할 최소 글자 수. 이보다 짧은 조각(예: "2", "a")은
+# 의미 없는 매칭(예: "B2B"의 "2"와 우연히 겹치는 경우)을 유발하므로 제외합니다.
+_MIN_KEYWORD_LEN = 2
+
+# 부분 문자열 포함 매칭을 적용할 최소 글자 수.
+# "b2"가 "b2b"에 포함된다고 매칭시키는 식의 우연한 매칭을 방지합니다.
+_MIN_CONTAINMENT_LEN = 3
+
+
+def _add_keyword(keywords, value):
+    """길이 조건(_MIN_KEYWORD_LEN 이상)을 만족하는 키워드만 집합에 추가합니다."""
+    value = value.strip().lower()
+    if len(value) >= _MIN_KEYWORD_LEN:
+        keywords.add(value)
+
 
 def _extract_keywords(*raw_values):
     """
@@ -77,20 +92,18 @@ def _extract_keywords(*raw_values):
             for item in _safe_json_list(raw):
                 text = _flatten_to_text(item)
                 for token in _TOKEN_RE.findall(text):
-                    keywords.add(token.lower())
+                    _add_keyword(keywords, token)
             continue
 
         text = _flatten_to_text(raw)
 
         # 2) 콤마/슬래시/세미콜론/줄바꿈 등으로 구분된 "태그형" 표현 우선 처리
         for chunk in re.split(r"[,/;\n]", text):
-            chunk = chunk.strip()
-            if chunk:
-                keywords.add(chunk.lower())
+            _add_keyword(keywords, chunk)
 
         # 3) 자유 서술형 텍스트에서도 단어 단위 토큰을 추출 (부분 매칭용)
         for token in _TOKEN_RE.findall(text):
-            keywords.add(token.lower())
+            _add_keyword(keywords, token)
 
     return keywords
 
@@ -98,8 +111,16 @@ def _extract_keywords(*raw_values):
 def _overlap(set_a, set_b):
     """
     두 키워드 집합 사이의 교집합을 구합니다.
-    완전히 같은 단어뿐 아니라, 한쪽이 다른쪽의 부분 문자열인 경우도
-    매칭으로 인정해서(예: "백엔드" ⊂ "백엔드개발자") 최대한 많은 항목을 찾아냅니다.
+
+    - 완전히 같은 키워드는 항상 매칭으로 인정합니다.
+    - 한쪽이 다른쪽의 부분 문자열인 경우도 매칭으로 인정해서
+      (예: "백엔드" ⊂ "백엔드개발자") 최대한 많은 항목을 찾아내지만,
+      다음 두 경우는 "우연한 매칭"을 막기 위해 제외합니다.
+        1) 두 키워드 중 하나라도 _MIN_CONTAINMENT_LEN(3글자)보다 짧은 경우
+           예) "b2"가 "b2b"에 포함된다고 해서 매칭으로 보지 않음
+        2) 두 키워드 중 하나라도 숫자로만 이루어진 경우
+           예) "2"가 "b2b"나 "2023"에 포함된다고 해서 매칭으로 보지 않음
+           (숫자 키워드는 완전히 동일한 경우에만 매칭)
     """
     matched = set()
     if not set_a or not set_b:
@@ -111,7 +132,20 @@ def _overlap(set_a, set_b):
         for b in set_b:
             if not b:
                 continue
-            if a == b or (a in b) or (b in a):
+
+            if a == b:
+                matched.add(a)
+                break
+
+            # 숫자로만 된 키워드는 완전 일치가 아니면 매칭으로 인정하지 않음
+            if a.isdigit() or b.isdigit():
+                continue
+
+            # 너무 짧은 키워드끼리의 부분 문자열 포함은 우연한 매칭일 가능성이 높음
+            if len(a) < _MIN_CONTAINMENT_LEN or len(b) < _MIN_CONTAINMENT_LEN:
+                continue
+
+            if (a in b) or (b in a):
                 # 더 짧은(=더 구체적인 일반 키워드) 쪽을 표시 키워드로 사용
                 matched.add(a if len(a) <= len(b) else b)
                 break
