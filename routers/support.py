@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import FAQ, Inquiry, InquiryStatus
 
-router = APIRouter(prefix="/support", tags=["support"])
+router = APIRouter(prefix="/api/support", tags=["support"])
 
 
 # ══════════════════════════════════════════════════════
