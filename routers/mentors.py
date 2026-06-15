@@ -2,48 +2,47 @@ from datetime import datetime, date
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Dict
+from sqlalchemy import desc
+
 from models import User, Mentor, Booking, MentorAvailability, get_db
 from schemas import MentorRegisterRequest, AvailabilityBulkRequest, PenaltyRequest
-from sqlalchemy import desc
-router = APIRouter(tags=["Mentors"])
 from .matching import calc_match_score
+
+router = APIRouter(tags=["Mentors"])
 
 
 @router.get("/api/mentors/recommended")
 async def get_recommended_mentors(user_id: int, db: Session = Depends(get_db)):
     try:
         current_user = db.query(User).filter(User.id == user_id).first()
-        mentors = db.query(User).join(Mentor, User.id == Mentor.user_id).filter(User.id != user_id).all()
+        
+        # 💡 [성능 최적화] User와 Mentor를 한 번의 쿼리로 JOIN해서 가져옵니다 (N+1 문제 해결)
+        results = db.query(User, Mentor).join(Mentor, User.id == Mentor.user_id).filter(User.id != user_id).all()
 
         scored_mentors = []
-        for user in mentors:
-            m_info = db.query(Mentor).filter(Mentor.user_id == user.id).first()
+        for user, m_info in results:
             score, reasons = calc_match_score(current_user, user) if current_user else (0, [])
             
-            # 💡 1. User 테이블에서 help_provide 데이터를 리스트로 파싱합니다.
+            # User 테이블에서 help_provide 데이터를 리스트로 파싱합니다.
             tech_stack = []
             if getattr(user, "help_provide", None):
                 tech_stack = [tech.strip() for tech in user.help_provide.split(",") if tech.strip()]
 
             scored_mentors.append({
-                "id": m_info.id if m_info else user.id,
-                "mentor_id": m_info.id if m_info else user.id,
+                "id": m_info.id,
+                "mentor_id": m_info.id,
                 "user_id": user.id,
                 "name": user.name or "호스트",
                 "bio": user.bio or "",
                 "profile_image": user.profile_image or "",
                 "hashtags": user.hashtags or "",
-                
-                # 🚀 2. 프론트엔드로 techStack 데이터를 쏴줍니다!
                 "techStack": tech_stack, 
-                
-                "mentor_intro": m_info.mentor_intro if m_info else "",
-                "job_title": m_info.job_title if m_info else "직무 미정",
-                "main_category": m_info.main_category if m_info else "",
-                "sub_category": m_info.sub_category if m_info else "",
-                "status": m_info.status if m_info else "현직자",
-                "mentor_keywords": m_info.mentoring_topics if m_info else "[]",
-                
+                "mentor_intro": m_info.mentor_intro,
+                "job_title": m_info.job_title or "직무 미정",
+                "main_category": m_info.main_category or "",
+                "sub_category": m_info.sub_category or "",
+                "status": m_info.status or "현직자",
+                "mentor_keywords": m_info.mentoring_topics or "[]",
                 "match_score": score,
                 "match_reasons": reasons[:3],
             })
@@ -53,40 +52,41 @@ async def get_recommended_mentors(user_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         print(f"🚨 get_recommended_mentors 에러: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/api/mentors")
 def get_mentors(db: Session = Depends(get_db)):
-    results = db.query(Mentor).order_by(desc(Mentor.views)).all()
+    # 💡 [성능 최적화] Mentor와 User를 한 번의 쿼리로 JOIN해서 가져옵니다 (N+1 문제 해결)
+    results = db.query(Mentor, User).join(User, Mentor.user_id == User.id).order_by(desc(Mentor.views)).all()
     
     mentors_data = []
-    for m in results:
-        user_info = db.query(User).filter(User.id == m.user_id).first()
+    for m, user_info in results:
         profile_url = user_info.profile_image if user_info and user_info.profile_image else ""
 
-        # 💡 User 테이블의 help_provide 데이터를 가져와 리스트 형태로 파싱
+        # User 테이블의 help_provide 데이터를 가져와 리스트 형태로 파싱
         tech_stack = []
         if user_info and getattr(user_info, "help_provide", None):
-            # 쉼표 기준으로 나누고 불필요한 공백 제거
             tech_stack = [tech.strip() for tech in user_info.help_provide.split(",") if tech.strip()]
 
         mentors_data.append({
-            # 🚀 ID 구조 통일
-            "id": m.id,             
+            "id": m.id,            
             "mentor_id": m.id,      
             "user_id": m.user_id,   
-            
             "name": m.name or "호스트",
             "status": m.status or "현직자",
             "main_category": m.main_category or "",
             "sub_category": m.sub_category or "",
             "price": m.price or "10,000 원",
             "job_title": m.job_title or "커리어 가이드",
-            "techStack": tech_stack, # 🚀 User 테이블의 help_provide 데이터 반영
+            "techStack": tech_stack, 
             "avatar": profile_url,
             "profile_image": profile_url,
             "bio": m.mentor_intro or "반가워요!",
             "views": m.views or 0,
         })
     return mentors_data
+
+
 @router.get("/api/mentors/list")
 def get_mentors_list(db: Session = Depends(get_db)):
     results = db.query(Mentor, User).join(User, Mentor.user_id == User.id).all()
@@ -94,17 +94,16 @@ def get_mentors_list(db: Session = Depends(get_db)):
     mentors_data = []
     for mentor, user in results:
         mentors_data.append({
-            # 🚀 ID 구조 통일 (기존 mentor.user_id에서 mentor.id로 변경)
             "id": mentor.id,            
             "mentor_id": mentor.id,     
             "user_id": mentor.user_id,  
-            
             "name": mentor.name,
             "job_title": mentor.job_title or "직무 미상",
             "hashtags": getattr(user, "hashtags", "") or "",
             "profile_image": getattr(user, "profile_image", "") or "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400"
         })
     return mentors_data
+
 
 @router.get("/api/mentors/{mentor_id}")
 def get_mentor_detail(mentor_id: int, db: Session = Depends(get_db)):
@@ -127,8 +126,6 @@ def get_mentor_detail(mentor_id: int, db: Session = Depends(get_db)):
         "career_history": mentor.career_history or [],
         "mentoring_topics": mentor.mentoring_topics or [],
         "detailed_experience": mentor.detailed_experience or [],
-        
-        # 💡 [핵심 수정] mentor.profile_image 대신 actual_profile_image를 검사합니다!
         "profile_image": actual_profile_image if (
             actual_profile_image and 
             actual_profile_image != "null" and 
@@ -136,6 +133,8 @@ def get_mentor_detail(mentor_id: int, db: Session = Depends(get_db)):
         ) else "https://upload.wikimedia.org/wikipedia/commons/7/7c/Profile_avatar_placeholder_large.png",
         "views": mentor.views,
     }
+
+
 @router.get("/api/mentor/details/{user_id}")
 def get_mentor_details(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
@@ -157,6 +156,7 @@ def get_mentor_details(user_id: int, db: Session = Depends(get_db)):
         "price": mentor.price or "10,000 원",
     }
 
+
 @router.post("/api/mentor/register/{user_id}")
 def register_mentor(user_id: int, request: MentorRegisterRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
@@ -174,9 +174,9 @@ def register_mentor(user_id: int, request: MentorRegisterRequest, db: Session = 
         db.add(mentor)
 
     mentor.name = request.name
-    mentor.status = request.status           # 추가
-    mentor.main_category = request.main_category # 추가
-    mentor.sub_category = request.sub_category   # 추가
+    mentor.status = request.status           
+    mentor.main_category = request.main_category 
+    mentor.sub_category = request.sub_category   
     mentor.job_title = request.job_title
     mentor.career_history = request.career_history
     mentor.mentor_intro = request.mentor_intro
@@ -185,7 +185,10 @@ def register_mentor(user_id: int, request: MentorRegisterRequest, db: Session = 
 
     db.commit()
     return {"message": "멘토 프로필 독립 등록 완료"}
+
+
 """
+# 대시보드 API (주석 처리된 원본 유지)
 @router.get("/api/mentor/dashboard/{user_id}")
 def get_mentor_dashboard_data(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
@@ -226,16 +229,17 @@ def get_mentor_dashboard_data(user_id: int, db: Session = Depends(get_db)):
         "upcoming_chats": upcoming_chats,
     }
 """
+
+
 @router.get("/api/mentor/availability/{mentor_id}")
 def get_mentor_availability(mentor_id: int, db: Session = Depends(get_db)):
-    # 💡 [핵심 수정 1] 엉뚱한 사람을 잡게 만드는 OR 조건 완전 삭제!
     mentor = db.query(Mentor).filter(Mentor.id == mentor_id).first()
     if not mentor:
-        return {} # 404 에러 튕김 방지
+        return {} 
 
     today = date.today()
     
-    # 💡 과거 일정 자동 청소 (Lazy Cleanup) - 여기서도 OR 조건 삭제
+    # 과거 일정 자동 청소 (Lazy Cleanup)
     db.query(MentorAvailability).filter(
         MentorAvailability.mentor_id == mentor.id,
         MentorAvailability.date < today
@@ -264,9 +268,9 @@ def get_mentor_availability(mentor_id: int, db: Session = Depends(get_db)):
 
     return result
 
+
 @router.post("/api/mentor/availability/bulk")
 def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Depends(get_db)):
-    # 💡 [핵심 수정 2] 저장할 때도 엉뚱한 사람 찾지 않도록 OR 조건 삭제!
     mentor = db.query(Mentor).filter(Mentor.id == request.mentor_id).first()
     
     if not mentor:
@@ -275,7 +279,6 @@ def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Dep
     real_mentor_id = mentor.id
 
     for date_str, times in request.schedules.items():
-        # 💡 여기서도 OR 조건 삭제
         db.query(MentorAvailability).filter(
             MentorAvailability.mentor_id == real_mentor_id,
             MentorAvailability.date == date_str,
@@ -287,6 +290,7 @@ def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Dep
 
     db.commit()
     return {"message": "가용 시간이 성공적으로 저장되었습니다."}
+
 
 @router.post("/api/mentor/penalty")
 def apply_mentor_penalty(request: PenaltyRequest, db: Session = Depends(get_db)):
