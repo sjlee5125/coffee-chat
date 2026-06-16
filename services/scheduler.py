@@ -38,12 +38,12 @@ def check_and_apply_noshows():
             
             # 💡 예약 시간으로부터 10분이 지났다면 검사 시작!
             if now >= limit_time:
-                # 멘토가 안 온 경우
-                if getattr(booking, 'is_mentor_entered', False) is False:
+    # ✅ 둘 다 안 온 경우 → 멘토 우선 처리
+                if not booking.is_mentor_entered and not booking.mentor_noshow:
                     process_noshow_penalty(db, booking.id, "mentor")
                 
-                # 멘티가 안 온 경우
-                elif getattr(booking, 'is_mentee_entered', False) is False:
+                # ✅ 멘토는 왔는데 멘티가 안 온 경우
+                elif booking.is_mentor_entered and not booking.is_mentee_entered and not booking.mentee_noshow:
                     process_noshow_penalty(db, booking.id, "mentee")
                     
     except Exception as e:
