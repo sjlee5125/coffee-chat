@@ -131,21 +131,28 @@ async def llm_assistant(
                     continue
 
                 try:
-                    recommend_prompt = f"""멘티가 사전에 준비한 질문 목록:
+                    recommend_prompt = f"""당신은 커피챗 멘토링 어시스턴트입니다.
+
+                    멘티가 사전에 작성한 질문 목록:
                     {preset_questions if preset_questions else '없음'}
 
-                    지금까지 나눈 대화 내용:
+                    지금까지 나눈 실제 대화 내용:
                     {conversation if conversation else '아직 대화 없음'}
 
-                    위 두 가지를 모두 참고해서 지금 이 순간 멘티가 물어보면 가장 좋을 질문 3개를 추천해주세요.
-                    사전 질문 중 아직 안 한 것 위주로, 대화 흐름에 맞게 골라주세요.
-                    반드시 JSON 배열로만 응답하세요.
+                    [중요 지침]
+                    1. 사전 질문 목록을 그대로 복사하지 마세요.
+                    2. 대화 내용을 분석해서 사전 질문 중 아직 다루지 않은 주제를 찾으세요.
+                    3. 대화 흐름에 자연스럽게 이어지는 새로운 질문 3개를 직접 작성하세요.
+                    4. 사전 질문과 똑같은 문장은 절대 사용하지 마세요. 표현을 다르게 바꾸거나 더 구체적으로 발전시키세요.
+                    5. 대화가 아직 없으면 사전 질문을 참고해서 대화를 시작할 수 있는 질문을 만드세요.
+
+                    반드시 JSON 배열 형태로만 응답하세요.
                     예시: ["질문1", "질문2", "질문3"]"""
 
                     response = llm_client.chat.completions.create(
                         model=AZURE_DEPLOYMENT_NAME,
                         messages=[
-                            {"role": "system", "content": "당신은 커피챗 멘토링 어시스턴트입니다. JSON 배열로만 응답하세요."},
+                            {"role": "system", "content": "당신은 커피챗 멘토링 어시스턴트입니다. 절대 사전 질문을 그대로 반복하지 마세요. 반드시 새롭게 작성한 질문만 JSON 배열로 응답하세요."},
                             {"role": "user", "content": recommend_prompt}
                         ],
                         temperature=0.7,
