@@ -249,12 +249,12 @@ class Inquiry(Base):
     title         = Column(String(200), nullable=False)               # 제목
     body          = Column(Text, nullable=False)                      # 문의 내용
     email         = Column(String(255), nullable=False)               # 답변받을 이메일
-    status        = Column(
-                        Enum(InquiryStatus),
-                        default=InquiryStatus.PENDING,
-                        nullable=False,
-                        index=True
-                    )
+    status = Column(
+    Enum(InquiryStatus, values_callable=lambda x: [e.value for e in x]),  # ← 이 줄 추가
+    default=InquiryStatus.PENDING,
+    nullable=False,
+    index=True
+)
     answer        = Column(Text, nullable=True)                       # 관리자 답변
     answered_at   = Column(DateTime, nullable=True)                   # 답변 일시
     answered_by   = Column(Integer, ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)  # 답변한 관리자 user_id
