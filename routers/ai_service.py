@@ -13,6 +13,7 @@ AZURE_ENDPOINT = "https://teatimes.cognitiveservices.azure.com/openai/deployment
 API_VERSION = "2024-12-01-preview"
 DEPLOYMENT_NAME = "ai_advice" 
 
+
 # 3. 위에서 만든 AZURE_API_KEY가 여기에 아주 자연스럽게 들어갑니다.
 client = AzureOpenAI(
      api_key=AZURE_API_KEY,
