@@ -15,6 +15,10 @@ import logging
 from typing import Dict, List
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+# 💡 여기에 방금 복사한 3줄을 추가하세요!
+from sqlalchemy.orm import Session
+from database import SessionLocal
+from models import Booking, Mentor
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["WebRTC Signaling"])
@@ -96,6 +100,23 @@ async def webrtc_signaling(
     await websocket.accept()
     room.peers[uid] = websocket
     logger.info(f"[시그널링] 입장 room={room_id} uid={uid} (현재 {len(room.peers)}명)")
+    db: Session = SessionLocal() # DB 세션 수동 열기
+    try:
+        booking = db.query(Booking).filter(Booking.id == booking_id).first()
+        if booking:
+            # 입장한 유저가 멘토인지 멘티인지 구분해서 도장 찍기
+            mentor = db.query(Mentor).filter(Mentor.user_id == user_id).first()
+            if mentor and booking.mentor_id == mentor.id:
+                booking.is_mentor_entered = True
+            elif booking.user_id == user_id:
+                booking.is_mentee_entered = True
+                
+            db.commit()
+            logger.info(f"✅ DB 기록 완료: 방 {booking_id}번 - 유저 {user_id} 입장")
+    except Exception as e:
+        logger.error(f"🚨 DB 입장 기록 실패: {e}")
+    finally:
+        db.close() # DB 세션 수동 닫기
 
     # 상대방에게 입장 알림 → 상대가 먼저 들어와 있으면 offer를 만들게 함
     await room.broadcast_except(uid, {

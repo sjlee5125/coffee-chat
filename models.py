@@ -74,6 +74,9 @@ class Mentor(Base):
     sub_category = Column(String(100), nullable=True)  # '백엔드' 등      
     views = Column(Integer, default=0, nullable=False)
     user_id = Column(Integer, ForeignKey("public.users.id"), unique=True, nullable=False)
+    noshow_count = Column(Integer, default=0)         # 누적 노쇼 횟수
+    penalty_end_date = Column(DateTime, nullable=True) # 패널티(정지) 풀리는 날짜
+    is_banned = Column(Boolean, default=False)        # 영구 정지 여부
 class Booking(Base):
     __tablename__ = "bookings"
     __table_args__ = {'schema': 'public'}
@@ -89,7 +92,8 @@ class Booking(Base):
     penalty_applied = Column(Boolean, default=False, nullable=False)  
     cancelled_at = Column(DateTime, nullable=True)                    
     cancelled_by = Column(String(10), nullable=True)                  
-
+    is_mentor_entered = Column(Boolean, default=False)
+    is_mentee_entered = Column(Boolean, default=False)
 
 class MentorAvailability(Base):
     __tablename__ = "mentor_availability"

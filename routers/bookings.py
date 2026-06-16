@@ -7,7 +7,7 @@ from models import User, Mentor, Booking, MentorAvailability, Notification, get_
 from routers.notifications import manager 
 from datetime import datetime, timedelta
 import requests
-
+from services.penalty_service import process_noshow_penalty
 router = APIRouter(
     prefix="/api/booking",
     tags=["Bookings"]
@@ -469,3 +469,14 @@ def get_recommended_mentors(booking_id: int, db: Session = Depends(get_db)):
         })
 
     return result
+@router.post("/api/bookings/{booking_id}/noshow")
+def report_noshow(booking_id: int, missing_role: str, db: Session = Depends(get_db)):
+    """
+    커피챗 노쇼 신고 API
+    - missing_role: "mentor" (멘토가 안 왔을 때) 또는 "mentee" (멘티가 안 왔을 때)
+    """
+    if missing_role not in ["mentor", "mentee"]:
+        raise HTTPException(status_code=400, detail="missing_role은 'mentor' 또는 'mentee'여야 합니다.")
+        
+    # 패널티 서비스 실행!
+    return process_noshow_penalty(db, booking_id, missing_role)
