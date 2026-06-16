@@ -18,7 +18,7 @@ from models import User, Mentor, Booking, MentorAvailability, ChatSession, get_d
 import auth
 from routers import users, mentors, bookings, ai, notifications, chat, chat_router, webrtc, stt, lim_chat, pipeline, general_chat, support , announcement, chatbot
 from routers.dashboard_router import router as dashboard_router_obj
-
+from services.scheduler import scheduler
 # 서버 실행 시 시스템의 .env 환경변수를 로드
 load_dotenv()
 #create_tables()
@@ -74,6 +74,14 @@ app.include_router(support.router)
 #app.include_router(pipeline.router)
 app.include_router(announcement.router)
 app.include_router(chatbot.router, prefix="/api", tags=["Chatbot"])
+@app.on_event("startup")
+def startup_event():
+    scheduler.start()
+    print("⏳ 노쇼 자동 탐지 스케줄러가 시작되었습니다!")
+
+@app.on_event("shutdown")
+def shutdown_event():
+    scheduler.shutdown()
 @app.get("/")
 def root():
     """서버 헬스 체크용 루트 엔드포인트"""

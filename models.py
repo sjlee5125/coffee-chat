@@ -89,7 +89,8 @@ class Booking(Base):
     penalty_applied = Column(Boolean, default=False, nullable=False)  
     cancelled_at = Column(DateTime, nullable=True)                    
     cancelled_by = Column(String(10), nullable=True)                  
-
+    is_mentor_entered = Column(Boolean, default=False)
+    is_mentee_entered = Column(Boolean, default=False)
 
 class MentorAvailability(Base):
     __tablename__ = "mentor_availability"
