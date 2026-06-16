@@ -15,7 +15,11 @@ import logging
 from typing import Dict, List
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+# 💡 여기에 방금 복사한 3줄을 추가하세요!
+from sqlalchemy.orm import Session
 from database import SessionLocal
+from models import Booking, Mentor
+
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["WebRTC Signaling"])
 
