@@ -1,5 +1,5 @@
 from apscheduler.schedulers.background import BackgroundScheduler
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time, date
 from sqlalchemy.orm import Session
 from database import SessionLocal # DB 세션 생성용
 from models import Booking
@@ -17,18 +17,33 @@ def check_and_apply_noshows():
         active_bookings = db.query(Booking).filter(Booking.status == "PAID").all()
         
         for booking in active_bookings:
-            # 2. 예약 시간 계산
-            scheduled_datetime = datetime.combine(booking.booking_date, booking.booking_time)
+            # 💡 DB에서 온 데이터가 문자열(str)일 경우 datetime 객체로 변환합니다.
+            b_date = booking.booking_date
+            b_time = booking.booking_time
+            
+            # 날짜 변환 (예: "2026-06-16")
+            if isinstance(b_date, str):
+                b_date = datetime.strptime(b_date, "%Y-%m-%d").date()
+                
+            # 시간 변환 (예: "14:00" 또는 "14:00:00")
+            if isinstance(b_time, str):
+                try:
+                    b_time = datetime.strptime(b_time, "%H:%M:%S").time()
+                except ValueError:
+                    b_time = datetime.strptime(b_time, "%H:%M").time()
+
+            # 안전하게 합치기
+            scheduled_datetime = datetime.combine(b_date, b_time)
             limit_time = scheduled_datetime + timedelta(minutes=10)
             
-            # 3. 예약 시간으로부터 10분이 지났다면 검사 시작!
+            # 💡 예약 시간으로부터 10분이 지났다면 검사 시작!
             if now >= limit_time:
                 # 멘토가 안 온 경우
-                if not booking.is_mentor_entered:
+                if getattr(booking, 'is_mentor_entered', False) is False:
                     process_noshow_penalty(db, booking.id, "mentor")
                 
                 # 멘티가 안 온 경우
-                elif not booking.is_mentee_entered:
+                elif getattr(booking, 'is_mentee_entered', False) is False:
                     process_noshow_penalty(db, booking.id, "mentee")
                     
     except Exception as e:

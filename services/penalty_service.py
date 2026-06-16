@@ -13,12 +13,24 @@ def process_noshow_penalty(db: Session, booking_id: int, missing_role: str):
         raise HTTPException(status_code=404, detail="예약을 찾을 수 없습니다.")
 
     # ════════════════════════════════════════════════════════════════
-    # 🔒 [시간 검증 로직] 정말 10분이 지났는지 확인!
+    # 🔒 [시간 검증 및 변환 로직] 
     # ════════════════════════════════════════════════════════════════
-    scheduled_datetime = datetime.combine(booking.booking_date, booking.booking_time)
+    b_date = booking.booking_date
+    b_time = booking.booking_time
+    
+    if isinstance(b_date, str):
+        b_date = datetime.strptime(b_date, "%Y-%m-%d").date()
+    if isinstance(b_time, str):
+        try:
+            b_time = datetime.strptime(b_time, "%H:%M:%S").time()
+        except ValueError:
+            b_time = datetime.strptime(b_time, "%H:%M").time()
+
+    scheduled_datetime = datetime.combine(b_date, b_time)
     now = datetime.now() # KST 기준
     limit_time = scheduled_datetime + timedelta(minutes=10)
     
+    # 강제 호출 시 10분이 안 지났으면 차단
     if now < limit_time:
         raise HTTPException(
             status_code=400, 
