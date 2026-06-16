@@ -1,9 +1,11 @@
 from datetime import datetime, date
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import Dict
 from sqlalchemy import desc
-
+from azure.storage.blob import BlobServiceClient, ContentSettings
+import uuid
+import os
 from models import User, Mentor, Booking, MentorAvailability, get_db
 from schemas import MentorRegisterRequest, AvailabilityBulkRequest, PenaltyRequest
 from .matching import calc_match_score
@@ -234,7 +236,41 @@ def get_mentor_dashboard_data(user_id: int, db: Session = Depends(get_db)):
         "upcoming_chats": upcoming_chats,
     }
 """
+@router.post("/api/upload/editor-image")
+async def upload_editor_image(file: UploadFile = File(...)):
+    """에디터 내부에 삽입되는 이미지를 imageupload 컨테이너에 저장합니다."""
+    
+    AZURE_CONNECTION_STRING = os.getenv("AZURE_CONNECTION_STRING")
+    CONTAINER_NAME = "imageupload"  # 💡 새 컨테이너 이름 타겟팅!
 
+    if not AZURE_CONNECTION_STRING:
+        raise HTTPException(status_code=500, detail="Azure Storage 연결 정보가 없습니다.")
+
+    try:
+        blob_service_client = BlobServiceClient.from_connection_string(AZURE_CONNECTION_STRING)
+        container_client = blob_service_client.get_container_client(CONTAINER_NAME)
+
+        # 1. 파일명 중복을 막기 위해 UUID 사용 + editor 폴더 경로 지정
+        file_extension = file.filename.split(".")[-1]
+        unique_filename = f"editor/{uuid.uuid4()}.{file_extension}"
+        
+        blob_client = container_client.get_blob_client(unique_filename)
+        
+        # 2. 파일 읽기
+        file_contents = await file.read()
+        
+        # 3. Content-Type 설정 (브라우저에서 다운로드되지 않고 바로 보이게 하려면 필수!)
+        content_settings = ContentSettings(content_type=file.content_type)
+        
+        # 4. Azure에 업로드
+        blob_client.upload_blob(file_contents, overwrite=True, content_settings=content_settings)
+
+        # 5. 저장된 이미지 URL 반환 (프론트엔드 ReactQuill로 전달됨)
+        return {"url": blob_client.url}
+
+    except Exception as e:
+        print(f"🚨 에디터 이미지 업로드 실패: {e}")
+        raise HTTPException(status_code=500, detail="이미지를 Azure에 업로드하는 중 오류가 발생했습니다.")
 
 @router.get("/api/mentor/availability/{mentor_id}")
 def get_mentor_availability(mentor_id: int, db: Session = Depends(get_db)):
