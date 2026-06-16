@@ -16,7 +16,7 @@ try:
     client = AzureOpenAI(
         api_key=os.getenv("AZURE_OPENAI_KEY"),
         api_version=os.getenv("AZURE_API_VERSION", "2024-02-15-preview"),
-        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT2")
     )
     DEPLOYMENT_NAME = "gpt-4o-mini"
     EMBEDDING_MODEL = os.getenv("AZURE_EMBEDDING_DEPLOYMENT", "text-embedding-3-large")
