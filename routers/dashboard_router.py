@@ -89,7 +89,8 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
     ]
 
     review_rows = (
-        db.query(User.name, Review.rating, Review.created_at)
+        # ⭕ Review.review 로 변경! (DB 컬럼명과 일치시킴)
+        db.query(User.name, Review.rating, Review.created_at, Review.review) 
         .select_from(Review)
         .join(User, User.id == Review.user_id)
         .filter(Review.mentor_id == mentor.id)
@@ -102,7 +103,7 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
         {
             "mentee_name": row.name,
             "rating": row.rating,
-            "content": "", 
+            "content": row.review, # 이건 잘 작성하셨습니다!
             "created_at": row.created_at.isoformat() if row.created_at else None,
         }
         for row in review_rows

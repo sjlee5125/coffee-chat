@@ -1,34 +1,9 @@
-"""
-멘토 추천 매칭 알고리즘
-─────────────────────────────────────────────────────────────
-멘티(현재 로그인한 사용자, current_user)의 프로필 정보와
-멘토(mentor_user / mentor_profile)의 프로필 정보를 비교해
-얼마나 잘 맞는지(match_score)와 그 이유(reasons)를 계산합니다.
-
-매칭에 사용하는 멘티 측 정보 (User 테이블)
-  - help_receive  : "배우고 싶은 분야"            → 가중치 가장 높음
-  - experience    : "주요 이력 및 경력 사항"       → 비슷한 배경 매칭
-  - help_provide  : "내가 확실히 도움을 줄 수 있는 분야" → 상호 교환형 매칭
-  - hashtags      : 관심 키워드 (보너스)
-
-매칭에 사용하는 멘토 측 정보
-  - Mentor.mentoring_topics / job_title / main_category / sub_category / mentor_intro
-  - Mentor.career_history / detailed_experience
-  - User(mentor).help_provide / help_receive / hashtags
-
-단순 완전 일치뿐 아니라, 한쪽 키워드가 다른쪽 키워드에 "부분 문자열"로
-포함되는 경우도 매칭으로 인정해서 최대한 많은 항목이 매칭되도록 합니다.
-(예: 내가 적은 "백엔드"가 멘토의 "백엔드 개발자" 안에 포함되는 경우)
-"""
-
 import json
 import re
-
 
 # ── 내부 유틸 함수들 ────────────────────────────────────────────────
 
 def _safe_json_list(value):
-    """JSON 배열 문자열을 파싱합니다. 실패하거나 배열이 아니면 적절히 보정합니다."""
     if not value:
         return []
     if isinstance(value, list):
@@ -43,9 +18,7 @@ def _safe_json_list(value):
     except (json.JSONDecodeError, TypeError):
         return [value]
 
-
 def _flatten_to_text(value):
-    """문자열/딕셔너리/리스트 등 어떤 구조든 검색 가능한 하나의 텍스트로 합칩니다."""
     if value is None:
         return ""
     if isinstance(value, str):
@@ -56,64 +29,78 @@ def _flatten_to_text(value):
         return " ".join(_flatten_to_text(v) for v in value)
     return str(value)
 
-
-# 한글/영문/숫자/+,# 등으로 이루어진 2글자 이상 토큰만 의미있는 키워드로 인정
 _TOKEN_RE = re.compile(r"[가-힣A-Za-z0-9+#.]{2,}")
+_MIN_KEYWORD_LEN = 2
+_MIN_CONTAINMENT_LEN = 3
 
+def _add_keyword(keywords, value):
+    value = value.strip().lower()
+    if len(value) >= _MIN_KEYWORD_LEN:
+        keywords.add(value)
 
 def _extract_keywords(*raw_values):
-    """
-    여러 소스(콤마로 구분된 태그 문자열, JSON 배열 문자열, 자유 서술형 텍스트 등)에서
-    중복 제거된 키워드 집합을 추출합니다.
-    """
     keywords = set()
-
     for raw in raw_values:
         if not raw:
             continue
-
-        # 1) JSON 배열 형태("[...]")로 저장된 필드는 먼저 펼쳐서 처리
         if isinstance(raw, str) and raw.strip().startswith("["):
             for item in _safe_json_list(raw):
                 text = _flatten_to_text(item)
                 for token in _TOKEN_RE.findall(text):
-                    keywords.add(token.lower())
+                    _add_keyword(keywords, token)
             continue
-
         text = _flatten_to_text(raw)
-
-        # 2) 콤마/슬래시/세미콜론/줄바꿈 등으로 구분된 "태그형" 표현 우선 처리
         for chunk in re.split(r"[,/;\n]", text):
-            chunk = chunk.strip()
-            if chunk:
-                keywords.add(chunk.lower())
-
-        # 3) 자유 서술형 텍스트에서도 단어 단위 토큰을 추출 (부분 매칭용)
+            _add_keyword(keywords, chunk)
         for token in _TOKEN_RE.findall(text):
-            keywords.add(token.lower())
-
+            _add_keyword(keywords, token)
     return keywords
-
 
 def _overlap(set_a, set_b):
     """
-    두 키워드 집합 사이의 교집합을 구합니다.
-    완전히 같은 단어뿐 아니라, 한쪽이 다른쪽의 부분 문자열인 경우도
-    매칭으로 인정해서(예: "백엔드" ⊂ "백엔드개발자") 최대한 많은 항목을 찾아냅니다.
+    [핵심 수정 1] 중복 매칭 방지 로직 적용
+    한 번 매칭된 타겟 단어는 다시 사용되지 않도록 used_b로 관리합니다.
+    긴 단어부터 매칭하여 '개발', '웹개발'이 '웹개발자' 하나에 중복으로 붙지 않게 합니다.
     """
     matched = set()
     if not set_a or not set_b:
         return matched
 
-    for a in set_a:
+    list_a = sorted(list(set_a), key=len, reverse=True)
+    list_b = sorted(list(set_b), key=len, reverse=True)
+    used_b = set()
+
+    for a in list_a:
         if not a:
             continue
-        for b in set_b:
-            if not b:
+        
+        exact_match = False
+        # 1. 완전 일치 우선 검사
+        for b in list_b:
+            if b in used_b:
                 continue
-            if a == b or (a in b) or (b in a):
-                # 더 짧은(=더 구체적인 일반 키워드) 쪽을 표시 키워드로 사용
+            if a == b:
+                matched.add(a)
+                used_b.add(b)
+                exact_match = True
+                break
+        
+        if exact_match:
+            continue
+            
+        # 2. 부분 일치 검사
+        for b in list_b:
+            if b in used_b:
+                continue
+            if a.isdigit() or b.isdigit():
+                continue
+            if len(a) < _MIN_CONTAINMENT_LEN or len(b) < _MIN_CONTAINMENT_LEN:
+                continue
+            
+            if (a in b) or (b in a):
+                # 표시할 때는 더 짧고 대중적인 키워드로 저장
                 matched.add(a if len(a) <= len(b) else b)
+                used_b.add(b)
                 break
 
     return matched
@@ -122,46 +109,22 @@ def _overlap(set_a, set_b):
 # ── 매칭 점수 계산 ───────────────────────────────────────────────────
 
 def calc_match_score(current_user, mentor_user, mentor_profile=None):
-    """
-    현재 사용자(current_user)와 멘토(mentor_user / mentor_profile)의
-    프로필을 비교해 매칭 점수(score)와 매칭 이유 목록(reasons)을 반환합니다.
-
-    Parameters
-    ----------
-    current_user : models.User
-        추천을 받는 멘티(나) 정보
-    mentor_user : models.User
-        멘토의 User 레코드 (help_provide / help_receive / hashtags 등)
-    mentor_profile : models.Mentor | None
-        멘토의 Mentor 레코드 (mentoring_topics / career_history 등).
-        라우터에서 (User, Mentor) JOIN 결과로 함께 들고 있으므로 그대로 전달하면 됩니다.
-
-    Returns
-    -------
-    (score: int, reasons: list[str])
-    """
-
     if current_user is None or mentor_user is None:
         return 0, []
 
     score = 0
     reasons = []
+    
+    # [핵심 수정 2] 항목 간 점수 중복(우려먹기)을 막기 위한 전역 집합
+    global_matched = set()
 
-    # ── 1. 멘티(나)가 가진 정보 ─────────────────────────────────────
-    my_learn_kw = _extract_keywords(
-        getattr(current_user, "help_receive", None),   # 배우고 싶은 분야
-    )
-    my_provide_kw = _extract_keywords(
-        getattr(current_user, "help_provide", None),   # 내가 확실히 도움을 줄 수 있는 분야
-    )
-    my_experience_kw = _extract_keywords(
-        getattr(current_user, "experience", None),      # 주요 이력 및 경력 사항
-    )
-    my_hashtag_kw = _extract_keywords(
-        getattr(current_user, "hashtags", None),
-    )
+    # ── 1. 멘티(나)가 가진 정보 ──
+    my_learn_kw = _extract_keywords(getattr(current_user, "help_receive", None))
+    my_provide_kw = _extract_keywords(getattr(current_user, "help_provide", None))
+    my_experience_kw = _extract_keywords(getattr(current_user, "experience", None))
+    my_hashtag_kw = _extract_keywords(getattr(current_user, "hashtags", None))
 
-    # ── 2. 멘토 쪽 정보 ─────────────────────────────────────────────
+    # ── 2. 멘토 쪽 정보 ──
     mentor_topic_kw = _extract_keywords(
         getattr(mentor_profile, "mentoring_topics", None) if mentor_profile else None,
         getattr(mentor_profile, "job_title", None) if mentor_profile else None,
@@ -176,54 +139,38 @@ def calc_match_score(current_user, mentor_user, mentor_profile=None):
         getattr(mentor_profile, "main_category", None) if mentor_profile else None,
         getattr(mentor_profile, "sub_category", None) if mentor_profile else None,
     )
-    mentor_provide_kw = _extract_keywords(
-        getattr(mentor_user, "help_provide", None),
-    )
-    mentor_receive_kw = _extract_keywords(
-        getattr(mentor_user, "help_receive", None),
-    )
-    mentor_hashtag_kw = _extract_keywords(
-        getattr(mentor_user, "hashtags", None),
-    )
+    mentor_provide_kw = _extract_keywords(getattr(mentor_user, "help_provide", None))
+    mentor_receive_kw = _extract_keywords(getattr(mentor_user, "help_receive", None))
+    mentor_hashtag_kw = _extract_keywords(getattr(mentor_user, "hashtags", None))
 
-    # ── 3. 항목별 매칭 & 점수 부여 ──────────────────────────────────
+    # ── 3. 항목별 매칭 & 점수 부여 ──
 
-    # (1) 내가 배우고 싶은 분야 ↔ 멘토의 전문분야 / 경력 / 소개 / 제공 가능한 도움
-    #     → 가장 핵심적인 매칭이므로 가중치를 가장 높게 설정
-    learn_match = _overlap(
-        my_learn_kw,
-        mentor_topic_kw | mentor_career_kw | mentor_provide_kw,
-    )
+    # (1) 내가 배우고 싶은 분야 
+    learn_match = _overlap(my_learn_kw, mentor_topic_kw | mentor_career_kw | mentor_provide_kw)
     if learn_match:
         score += 40 * len(learn_match)
-        reasons.append(
-            f"배우고 싶은 분야({', '.join(sorted(learn_match)[:3])})와 멘토의 전문 분야가 잘 맞아요"
-        )
+        reasons.append(f"배우고 싶은 분야({', '.join(sorted(learn_match)[:3])})와 멘토의 전문 분야가 잘 맞아요")
+        global_matched.update(learn_match) # 점수 받은 단어 등록
 
-    # (2) 내 경력/이력 ↔ 멘토의 경력 / 직무 / 카테고리
-    #     → 비슷한 커리어 배경을 가진 멘토를 우선 추천
-    career_match = _overlap(my_experience_kw, mentor_career_kw)
+    # (2) 내 경력/이력
+    # 이미 점수를 받은 단어(global_matched)는 제외하여 중복 점수를 막음
+    career_match = _overlap(my_experience_kw, mentor_career_kw) - global_matched
     if career_match:
         score += 20 * len(career_match)
-        reasons.append(
-            f"경력 분야({', '.join(sorted(career_match)[:3])})가 비슷해 공감대를 형성하기 좋아요"
-        )
+        reasons.append(f"경력 분야({', '.join(sorted(career_match)[:3])})가 비슷해 공감대를 형성하기 좋아요")
+        global_matched.update(career_match)
 
-    # (3) 내가 도움을 줄 수 있는 분야 ↔ 멘토가 도움 받고 싶어하는 분야
-    #     → 서로 주고받을 수 있는 "상호 교환형" 매칭
-    mutual_match = _overlap(my_provide_kw, mentor_receive_kw)
+    # (3) 상호 교환형 매칭
+    mutual_match = _overlap(my_provide_kw, mentor_receive_kw) - global_matched
     if mutual_match:
         score += 15 * len(mutual_match)
-        reasons.append(
-            f"내가 도움을 줄 수 있는 분야({', '.join(sorted(mutual_match)[:3])})를 멘토님도 필요로 해요"
-        )
+        reasons.append(f"내가 도움을 줄 수 있는 분야({', '.join(sorted(mutual_match)[:3])})를 멘토님도 필요로 해요")
+        global_matched.update(mutual_match)
 
-    # (4) 해시태그 / 관심 키워드 겹침 → 보너스 점수
-    hashtag_match = _overlap(my_hashtag_kw, mentor_hashtag_kw | mentor_topic_kw)
+    # (4) 해시태그 / 관심 키워드
+    hashtag_match = _overlap(my_hashtag_kw, mentor_hashtag_kw | mentor_topic_kw) - global_matched
     if hashtag_match:
         score += 5 * len(hashtag_match)
-        reasons.append(
-            f"공통 관심 키워드({', '.join(sorted(hashtag_match)[:3])})가 있어요"
-        )
+        reasons.append(f"공통 관심 키워드({', '.join(sorted(hashtag_match)[:3])})가 있어요")
 
     return score, reasons
