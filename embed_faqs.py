@@ -15,18 +15,17 @@ client = AzureOpenAI(
     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
 )
 
-EMBEDDING_MODEL = "text-embedding-ada-002"
+EMBEDDING_MODEL = os.getenv("AZURE_EMBEDDING_DEPLOYMENT", "text-embedding-3-large")
 
 with engine.connect() as conn:
-    # 임베딩 없는 FAQ 가져오기
     faqs = conn.execute(text(
-        "SELECT id, question, answer, embedding_text FROM public.faqs WHERE embedding IS NULL"
+        "SELECT id, question, answer FROM public.faqs WHERE embedding IS NULL"
     )).fetchall()
 
     print(f"임베딩할 FAQ: {len(faqs)}개")
+    print(f"사용 모델: {EMBEDDING_MODEL}")
 
     for faq in faqs:
-        # 질문 + 답변 합쳐서 임베딩
         content = f"{faq.question} {faq.answer}"
         
         response = client.embeddings.create(
@@ -34,10 +33,14 @@ with engine.connect() as conn:
             model=EMBEDDING_MODEL
         )
         embedding = response.data[0].embedding
+        
+        # pgvector 형식으로 변환
+        embedding_str = '[' + ','.join(map(str, embedding)) + ']'
 
+        # SQLAlchemy text()에서 :: 캐스팅 문제 해결
         conn.execute(text(
-            "UPDATE public.faqs SET embedding = :embedding WHERE id = :id"
-        ), {"embedding": str(embedding), "id": faq.id})
+            "UPDATE public.faqs SET embedding = cast(:embedding as vector) WHERE id = :id"
+        ), {"embedding": embedding_str, "id": faq.id})
         
         print(f"✅ FAQ {faq.id} 임베딩 완료")
 

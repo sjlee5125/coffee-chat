@@ -161,7 +161,8 @@ def create_inquiry(payload: InquiryCreate, db: Session = Depends(get_db)):
         title=payload.title,
         body=payload.body,
         email=payload.email,
-        status=InquiryStatus.PENDING,
+        status="pending",
+
     )
     db.add(inquiry)
     db.commit()
