@@ -10,7 +10,6 @@ from sqlalchemy.orm import sessionmaker,relationship
 from sqlalchemy import Column, Integer, String,DateTime, UniqueConstraint, Text,JSON
 from sqlalchemy.sql import func
 from database import Base
-from pgvector.sqlalchemy import Vector
 
 
 # ─── 1. 데이터베이스 연결 설정 ───
@@ -216,13 +215,12 @@ class FAQ(Base):
     __table_args__ = {'schema': 'public'}
  
     id             = Column(Integer, primary_key=True, index=True)
-    category       = Column(String(50), nullable=False, index=True)
-    question       = Column(Text, nullable=False)
-    answer         = Column(Text, nullable=False)
-    embedding_text = Column(Text, nullable=True)
-    embedding      = Column(Vector(3072), nullable=True)   # ✅ 추가
-    is_active      = Column(Boolean, default=True, nullable=False)
-    sort_order     = Column(Integer, default=0, nullable=False)
+    category       = Column(String(50), nullable=False, index=True)   # 예약/결제, 환불, 멘토링, 계정
+    question       = Column(Text, nullable=False)                     # 질문
+    answer         = Column(Text, nullable=False)                     # 답변
+    embedding_text = Column(Text, nullable=True)                      # RAG용: question + " " + answer
+    is_active      = Column(Boolean, default=True, nullable=False)    # 노출 여부 (비활성화 소프트 삭제)
+    sort_order     = Column(Integer, default=0, nullable=False)       # 같은 카테고리 내 노출 순서
     created_at     = Column(DateTime, server_default=func.now())
     updated_at     = Column(DateTime, server_default=func.now(), onupdate=func.now())
  
