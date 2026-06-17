@@ -5,11 +5,7 @@ Azure Speech STT 연동
   1. 프론트가 WebSocket으로 접속 (/ws/stt/{booking_id}/{user_id})
   2. 브라우저 MediaRecorder → PCM(16kHz·16bit·mono) 청크를 서버로 전송
   3. 서버가 Azure Speech SDK로 실시간 인식 → 결과를 같은 방의 두 클라이언트에게 브로드캐스트
-  4. 통화 종료 시 전체 STT 텍스트를 ChatSession.stt_text에 저장
-
-환경변수 (.env):
-  AZURE_SPEECH_KEY=<your-key>
-  AZURE_SPEECH_REGION=koreacentral   # 또는 eastasia 등
+  4. 통화 종료 or 연결 끊김 시 전체 STT 텍스트를 ChatSession.stt_text에 저장
 """
 
 import asyncio
@@ -28,7 +24,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["STT"])
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
 AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION")
-# Azure SDK는 선택적 import (키가 없는 환경에서도 서버가 뜨도록)
+
 try:
     import azure.cognitiveservices.speech as speechsdk
     SPEECH_AVAILABLE = bool(AZURE_SPEECH_KEY)
@@ -37,16 +33,17 @@ except ImportError:
     SPEECH_AVAILABLE = False
     logger.warning("⚠️  azure-cognitiveservices-speech 미설치. STT 비활성화.")
 
-# routers/stt.py 파일의 load_dotenv() 바로 아래에 추가
 print(f"DEBUG: STT KEY={AZURE_SPEECH_KEY}")
 print(f"DEBUG: STT REGION={AZURE_SPEECH_REGION}")
+
+
 # ──────────────────────────────────────────────
 # 방별 STT 상태 관리
 # ──────────────────────────────────────────────
 class STTRoomState:
     def __init__(self):
-        self.connections: Dict[str, WebSocket] = {}  # uid → ws
-        self.transcripts: List[dict] = []             # 전체 대화 누적
+        self.connections: Dict[str, WebSocket] = {}
+        self.transcripts: List[dict] = []
 
     async def broadcast(self, message: dict):
         dead = []
@@ -63,10 +60,49 @@ stt_rooms: Dict[str, STTRoomState] = defaultdict(STTRoomState)
 
 
 # ──────────────────────────────────────────────
+# ✅ DB 저장 공통 함수 (end_session + disconnect 양쪽에서 재사용)
+# ──────────────────────────────────────────────
+def _save_stt_to_db(booking_id: int, room_state: STTRoomState):
+    """누적된 STT transcript를 ChatSession.stt_text에 저장 (누적 append)"""
+    from models import ChatSession, get_db as _get_db
+
+    finals = [t for t in room_state.transcripts if t.get("type") == "final"]
+    if not finals:
+        logger.info(f"[STT] 저장할 STT 내용 없음 booking_id={booking_id}")
+        return
+
+    new_text = "\n".join(f"[{t['speaker']}] {t['text']}" for t in finals)
+
+    db_gen = _get_db()
+    try:
+        db: Session = next(db_gen)
+        session = db.query(ChatSession).filter(
+            ChatSession.booking_id == booking_id
+        ).first()
+
+        if session:
+            # ✅ 기존 내용이 있으면 이어붙이기 (새로고침 후 재접속 시 유실 방지)
+            if session.stt_text:
+                session.stt_text = session.stt_text + "\n" + new_text
+            else:
+                session.stt_text = new_text
+            db.commit()
+            logger.info(f"[STT] stt_text DB 저장 완료 booking_id={booking_id} ({len(finals)}줄)")
+        else:
+            logger.warning(f"[STT] ChatSession 없음 booking_id={booking_id}")
+    except Exception as db_err:
+        logger.error(f"[STT] DB 저장 실패: {db_err}")
+    finally:
+        try:
+            next(db_gen)
+        except StopIteration:
+            pass
+
+
+# ──────────────────────────────────────────────
 # Azure Speech 인식기 생성 헬퍼
 # ──────────────────────────────────────────────
 def _make_push_stream_recognizer(room_id: str, speaker_name: str, loop: asyncio.AbstractEventLoop):
-    """PushAudioInputStream을 이용한 실시간 인식기 반환"""
     if not SPEECH_AVAILABLE:
         return None, None
 
@@ -74,25 +110,12 @@ def _make_push_stream_recognizer(room_id: str, speaker_name: str, loop: asyncio.
         subscription=AZURE_SPEECH_KEY,
         region=AZURE_SPEECH_REGION,
     )
-    
     speech_config.speech_recognition_language = "ko-KR"
-    
-    # 💡 [1] 문장 부호 및 포맷팅 강제 옵션 (TrueText 알고리즘 적용)
-    # 문맥을 분석해 마침표, 물음표, 띄어쓰기를 더 정교하게 보정합니다.
     speech_config.set_property(
         speechsdk.PropertyId.SpeechServiceResponse_PostProcessingOption, "TrueText"
     )
-
-    # 💡 [2] 비속어 필터링 (품질 유지)
-    # 대화 중 비속어가 섞일 경우 이를 마스킹(***) 처리하여 자막 품질을 깨끗하게 유지합니다.
     speech_config.set_profanity(speechsdk.ProfanityOption.Masked)
-
-    # 💡 [3] 상세 출력 포맷 설정 (선택 사항)
-    # 기본값은 'Simple'이지만 'Detailed'로 설정하면 내부적으로 ITN(숫자 변환)이 
-    # 완벽하게 적용된 Display Text를 생성하는 데 도움을 줍니다.
     speech_config.output_format = speechsdk.OutputFormat.Detailed
-
-    # 중간 결과도 수신하기 위한 딜레이 조정
     speech_config.set_property(
         speechsdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "1500"
     )
@@ -122,7 +145,6 @@ def _make_push_stream_recognizer(room_id: str, speaker_name: str, loop: asyncio.
         text = evt.result.text.strip()
         if not text:
             return
-        # 중간 결과는 DB 저장 없이 브로드캐스트만
         asyncio.run_coroutine_threadsafe(
             room_state.broadcast({"speaker": speaker_name, "text": text, "type": "interim"}),
             loop,
@@ -137,7 +159,6 @@ def _make_push_stream_recognizer(room_id: str, speaker_name: str, loop: asyncio.
 
 # ──────────────────────────────────────────────
 # STT WebSocket 엔드포인트
-# ws://host/ws/stt/{booking_id}/{user_id}/{speaker_name}
 # ──────────────────────────────────────────────
 @router.websocket("/ws/stt/{booking_id}/{user_id}/{speaker_name}")
 async def stt_endpoint(
@@ -146,13 +167,6 @@ async def stt_endpoint(
     user_id: int,
     speaker_name: str,
 ):
-    """
-    클라이언트가 보내는 메시지 타입:
-      - binary: PCM 오디오 청크 (16kHz·16bit·mono)
-      - text JSON {"type": "end_session"}: 통화 종료, DB 저장 요청
-    """
-    from models import ChatSession, get_db as _get_db  # 순환 import 방지
-
     room_id = str(booking_id)
     uid = str(user_id)
     room_state = stt_rooms[room_id]
@@ -161,30 +175,30 @@ async def stt_endpoint(
     room_state.connections[uid] = websocket
     logger.info(f"[STT] 접속 room={room_id} uid={uid} speaker={speaker_name}")
 
-    # Azure 인식기 초기화
+    # ✅ 재접속 시 이전 transcript 초기화 (새로고침 후 중복 저장 방지)
+    room_state.transcripts = []
+
     loop = asyncio.get_event_loop()
     recognizer, push_stream = _make_push_stream_recognizer(room_id, speaker_name, loop)
 
     if not SPEECH_AVAILABLE:
-        # STT 불가 환경에서도 더미 응답으로 연결은 유지
         await websocket.send_json({
             "type": "notice",
-            "text": "STT 서비스가 설정되지 않았습니다. 텍스트만 수신됩니다.",
+            "text": "STT 서비스가 설정되지 않았습니다.",
         })
+
+    db_saved = False  # ✅ 중복 저장 방지 플래그
 
     try:
         while True:
             msg = await websocket.receive()
 
-            # 💡 [핵심 추가 포인트] 클라이언트가 연결을 끊으면 즉시 루프 탈출
             if msg.get("type") == "websocket.disconnect":
-                logger.info(f"[STT] 클라이언트가 웹소켓 연결을 종료했습니다. (Disconnect 감지)")
+                logger.info(f"[STT] 클라이언트 disconnect 감지 room={room_id} uid={uid}")
                 break
 
             if "bytes" in msg and push_stream:
                 if len(msg["bytes"]) > 0:
-                    # 너무 자주 찍히면 성능 저하가 올 수 있으니 디버깅 후엔 주석 처리 추천
-                    # logger.info(f"🎤 [STT] 오디오 청크 수신: {len(msg['bytes'])} bytes") 
                     push_stream.write(msg["bytes"])
 
             elif "text" in msg:
@@ -194,29 +208,9 @@ async def stt_endpoint(
                     continue
 
                 if data.get("type") == "end_session":
-                    # ── 세션 종료: STT 결과 DB 저장 ───────────
-                    full_text = "\n".join(
-                        f"[{t['speaker']}] {t['text']}"
-                        for t in room_state.transcripts
-                        if t.get("type") == "final"
-                    )
-                    try:
-                        db_gen = _get_db()
-                        db: Session = next(db_gen)
-                        session = db.query(ChatSession).filter(
-                            ChatSession.booking_id == booking_id
-                        ).first()
-                        if session:
-                            session.stt_text = full_text
-                            db.commit()
-                            logger.info(f"[STT] stt_text DB 저장 완료 booking_id={booking_id}")
-                    except Exception as db_err:
-                        logger.error(f"[STT] DB 저장 실패: {db_err}")
-                    finally:
-                        try:
-                            next(db_gen)
-                        except StopIteration:
-                            pass
+                    # ✅ 정상 종료 시 DB 저장
+                    _save_stt_to_db(booking_id, room_state)
+                    db_saved = True
 
                     await websocket.send_json({
                         "type": "session_ended",
@@ -224,10 +218,15 @@ async def stt_endpoint(
                     })
 
     except WebSocketDisconnect:
-        pass
+        logger.info(f"[STT] WebSocketDisconnect room={room_id} uid={uid}")
     except Exception as e:
         logger.error(f"[STT] 예외 room={room_id} uid={uid}: {e}")
     finally:
+        # ✅ 연결 끊김/새로고침 시에도 저장 (end_session으로 이미 저장한 경우 스킵)
+        if not db_saved:
+            logger.info(f"[STT] 비정상 종료 감지 → DB 저장 시도 booking_id={booking_id}")
+            _save_stt_to_db(booking_id, room_state)
+
         # 인식기 정리
         if recognizer:
             try:
@@ -247,7 +246,6 @@ async def stt_endpoint(
 
 # ──────────────────────────────────────────────
 # STT 텍스트 조회 REST API
-# GET /api/stt/{booking_id}
 # ──────────────────────────────────────────────
 @router.get("/api/stt/{booking_id}")
 def get_stt_transcript(booking_id: int):
