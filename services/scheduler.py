@@ -47,6 +47,7 @@ def check_and_apply_noshows():
         print(f"🚨 노쇼 스케줄러 실행 중 에러 발생: {e}")
     finally:
         db.close()
+logging.getLogger('apscheduler').setLevel(logging.WARNING)
 
 scheduler = BackgroundScheduler(timezone="Asia/Seoul")
 scheduler.add_job(check_and_apply_noshows, 'interval', minutes=1)

@@ -30,6 +30,8 @@ class EndpointFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         if record.getMessage().find("/api/notifications") != -1:
             return False
+        if "check_and_apply_noshows" in record.getMessage():
+            return False
         return True
 
 # uvicorn 접근 로거에 필터 부착
