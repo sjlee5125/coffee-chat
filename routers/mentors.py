@@ -1,4 +1,4 @@
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import Dict
@@ -316,6 +316,27 @@ def save_mentor_availability(request: AvailabilityBulkRequest, db: Session = Dep
     
     if not mentor:
         raise HTTPException(status_code=404, detail="멘토 정보가 없습니다.")
+
+    # =========================================================
+    # 💡 [핵심 추가] 페널티 검증 로직
+    # =========================================================
+    now_kst = datetime.utcnow() + timedelta(hours=9)
+
+    # 1) 영구 정지(BANNED) 확인
+    if getattr(mentor, "is_banned", False):
+        raise HTTPException(
+            status_code=403,
+            detail="누적 노쇼로 인해 계정이 영구 정지되어 일정을 등록할 수 없습니다."
+        )
+
+    # 2) 기간 정지 확인 (현재 시간이 penalty_end_date보다 이전이면 차단)
+    if getattr(mentor, "penalty_end_date", None) and mentor.penalty_end_date > now_kst:
+        available_time = mentor.penalty_end_date.strftime('%Y-%m-%d %H:%M')
+        raise HTTPException(
+            status_code=403,
+            detail=f"노쇼 페널티 기간에는 일정을 등록할 수 없습니다. ({available_time} 이후 등록 가능)"
+        )
+    # =========================================================
 
     real_mentor_id = mentor.id
 
