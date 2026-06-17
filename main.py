@@ -134,8 +134,9 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
         # JWT 세션 토큰 발행
         access_token = auth.create_access_token(data={"sub": user.email, "user_id": user.id})
         
+        # 💡 강제로 무조건 메인 페이지('/')로 보내도록 프론트엔드 URL 수정!
         if is_new_user:
-            frontend_url = f"http://localhost:5173/profile-setup?token={access_token}&name={quote(user.name)}&email={quote(user.email)}&id={str(user.id)}"
+            frontend_url = f"http://localhost:5173/?token={access_token}&name={quote(user.name)}&email={quote(user.email)}&id={str(user.id)}"
         else:
             frontend_url = f"http://localhost:5173/?token={access_token}&name={quote(user.name)}&id={str(user.id)}"
 
