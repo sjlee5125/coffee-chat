@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-
+from pydantic import BaseModel
 # 필요한 모델들 임포트
 from models import Booking, ChatSession, CoffeeChatReport, Review, Mentor, User, get_db
 from routers.pipeline import agent_regex_masking, agent_azure_pii, agent_llm_masking, agent_llm_summary, generate_pdf_report
@@ -16,7 +16,8 @@ class ReviewCreateRequest(BaseModel):
     booking_id: int
     rating: int
     review: str  # 게스트가 작성한 한 줄 평 후기
-
+class TranscriptRequest(BaseModel):
+    transcript: str
 
 # ==========================================
 # 1. 커피챗 세션 시작 API
@@ -250,3 +251,19 @@ def get_coffee_chat_report(booking_id: int, db: Session = Depends(get_db)):
         "summary": report.summary,       
         "ai_advice": report.ai_advice    
     }
+@router.post("/api/chat-session/{session_id}/save-transcript")
+def save_transcript(session_id: str, req: TranscriptRequest, db: Session = Depends(get_db)):
+    chat_session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+    if chat_session:
+        chat_session.stt_text = req.transcript  # DB의 stt_text 컬럼에 안전하게 덮어쓰기
+        db.commit()
+        return {"status": "success", "message": "대화 기록 저장 완료"}
+    raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+
+# 2. 튕겼다가 다시 접속 시: DB에 저장된 대화 내용 불러오기
+@router.get("/api/chat-session/{session_id}/transcript")
+def get_transcript(session_id: str, db: Session = Depends(get_db)):
+    chat_session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+    if chat_session and chat_session.stt_text:
+        return {"transcript": chat_session.stt_text}
+    return {"transcript": ""}
