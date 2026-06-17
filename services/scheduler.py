@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import Booking
 from services.penalty_service import process_noshow_penalty
-
+import logging
 def check_and_apply_noshows():
     """
     1분마다 실행되며 10분이 지난 예약 중 미입장자를 찾아 노쇼 처리합니다.
