@@ -255,10 +255,10 @@ def get_coffee_chat_report(booking_id: int, db: Session = Depends(get_db)):
 def save_transcript(session_id: str, req: TranscriptRequest, db: Session = Depends(get_db)):
     chat_session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
     if chat_session:
-        chat_session.stt_text = req.transcript  # DB의 stt_text 컬럼에 안전하게 덮어쓰기
+        chat_session.stt_text = req.transcript  # DB에 덮어쓰기
         db.commit()
-        return {"status": "success", "message": "대화 기록 저장 완료"}
-    raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+        return {"status": "success"}
+    return {"status": "error", "message": "세션 없음"}
 
 # 2. 튕겼다가 다시 접속 시: DB에 저장된 대화 내용 불러오기
 @router.get("/api/chat-session/{session_id}/transcript")
