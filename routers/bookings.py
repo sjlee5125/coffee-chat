@@ -283,7 +283,13 @@ def get_booking(booking_id: int, db: Session = Depends(get_db)):
     if not booking:
         raise HTTPException(status_code=404, detail="예약 정보를 찾을 수 없습니다.")
 
+    # 1. 멘토 정보 가져오기
     mentor = db.query(Mentor).filter(Mentor.id == booking.mentor_id).first()
+    
+    # 🌟 2. 멘토의 사진이 들어있는 'User' 테이블 정보 가져오기 (추가된 부분!)
+    mentor_user = db.query(User).filter(User.id == mentor.user_id).first() if mentor else None
+    
+    # 3. 멘티 정보 가져오기
     mentee_user = db.query(User).filter(User.id == booking.user_id).first()
 
     return {
@@ -297,7 +303,9 @@ def get_booking(booking_id: int, db: Session = Depends(get_db)):
         "mentor_user_id": mentor.user_id if mentor else None,
         "user_id": booking.user_id,
         "mentor_name": mentor.name if mentor else "멘토",
-        "user_name": mentee_user.name if mentee_user else "멘티"
+        "user_name": mentee_user.name if mentee_user else "멘티",
+        # 🌟 4. 프론트엔드로 멘토 프로필 사진 URL 쏴주기! (프론트에서 수정한 이름과 똑같이 맞춤)
+        "mentor_profile_image": mentor_user.profile_image if mentor_user else None
     }
 
 
