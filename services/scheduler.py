@@ -48,5 +48,5 @@ def check_and_apply_noshows():
     finally:
         db.close()
 
-scheduler = BackgroundScheduler()
+scheduler = BackgroundScheduler(timezone="Asia/Seoul")
 scheduler.add_job(check_and_apply_noshows, 'interval', minutes=1)
