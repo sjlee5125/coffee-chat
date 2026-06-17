@@ -252,18 +252,18 @@ def get_coffee_chat_report(booking_id: int, db: Session = Depends(get_db)):
         "ai_advice": report.ai_advice    
     }
 @router.post("/api/chat-session/{session_id}/save-transcript")
-def save_transcript(session_id: str, req: TranscriptRequest, db: Session = Depends(get_db)):
-    chat_session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+def save_transcript(session_id: int, req: TranscriptRequest, db: Session = Depends(get_db)):
+    chat_session = db.query(ChatSession).filter(ChatSession.id == session_id).first() # 💡 session_id를 id로 수정!
     if chat_session:
-        chat_session.stt_text = req.transcript  # DB에 덮어쓰기
+        chat_session.stt_text = req.transcript
         db.commit()
         return {"status": "success"}
     return {"status": "error", "message": "세션 없음"}
 
 # 2. 튕겼다가 다시 접속 시: DB에 저장된 대화 내용 불러오기
 @router.get("/api/chat-session/{session_id}/transcript")
-def get_transcript(session_id: str, db: Session = Depends(get_db)):
-    chat_session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+def get_transcript(session_id: int, db: Session = Depends(get_db)):
+    chat_session = db.query(ChatSession).filter(ChatSession.id == session_id).first() # 💡 session_id를 id로 수정!
     if chat_session and chat_session.stt_text:
         return {"transcript": chat_session.stt_text}
     return {"transcript": ""}
