@@ -338,46 +338,44 @@ def verify_payment(data: PaymentVerifyRequest):
 def get_bookings(user_id: int, db: Session = Depends(get_db)):
     print(f" [CoffeeChats 조회] User ID: {user_id}")
 
-    # 1. 내 멘토 정보 안전하게 조회
     mentor = db.query(Mentor).filter(Mentor.user_id == user_id).first()
     mentor_id = mentor.id if mentor else -1
 
-    # 💡 [핵심 수정] 승재 님 말씀대로 보낸 신청(user_id)과 받은 신청(mentor_id 또는 user_id 직접 매칭) 조건을 가장 확실하게 묶음!
+    # 💡 [핵심 수정] 대기(PAID)는 빼고, 화상채팅에 뜰 확정(CONFIRMED), 종료(COMPLETED), 노쇼취소(CANCELLED)만 가져옵니다!
     bookings = db.query(Booking).filter(
-        Booking.status == "CONFIRMED",
-        ((Booking.user_id == user_id) | (Booking.mentor_id == mentor_id) | (Booking.mentor_id == user_id))
+        Booking.status.in_(["CONFIRMED", "COMPLETED", "CANCELLED"]),
+        ((Booking.user_id == user_id) | (Booking.mentor_id == mentor_id))
     ).order_by(Booking.booking_date.asc()).all()
 
-    now = datetime.utcnow() + timedelta(hours=9)
+    now = datetime.utcnow() + timedelta(hours=9) # 한국 시간
     result = []
 
     for b in bookings:
         booking_datetime = _parse_booking_datetime(b.booking_date, b.booking_time)
         diff_min = (booking_datetime - now).total_seconds() / 60
 
-        # ── tab_status 계산 ──────────────────────────────
         chat_session = db.query(ChatSession).filter(ChatSession.booking_id == b.id).first()
 
-        # 💡 [버그 수정] 아무리 세션이 완료 상태여도, 아직 예약 시간이 도래하지 않은 미래 시간(diff_min > 5)이면 무조건 'upcoming'으로 보호!
-        if diff_min > 5:
-            tab_status = "upcoming"
-        elif chat_session and chat_session.status == "COMPLETED":
-            tab_status = "completed"
-        elif chat_session and chat_session.status == "ONGOING":
-            tab_status = "ongoing"
+        # ── 탭(tab_status) 분류 로직 ──
+        if b.status in ["COMPLETED", "CANCELLED"]:
+            tab_status = "completed"  # 이미 종료/취소된 건 무조건 '종료' 탭으로!
         else:
-            # 시간 기준으로 최종 계산
+            # CONFIRMED(확정) 상태인 경우 시간에 따라 분류
             if diff_min > 5:
                 tab_status = "upcoming"
-            elif -30 <= diff_min <= 5:
+            elif chat_session and chat_session.status == "COMPLETED":
+                tab_status = "completed"
+            elif chat_session and chat_session.status == "ONGOING":
                 tab_status = "ongoing"
             else:
-                tab_status = "completed"
+                if diff_min > 5:
+                    tab_status = "upcoming"
+                elif -30 <= diff_min <= 5:
+                    tab_status = "ongoing"
+                else:
+                    tab_status = "completed"
 
-        #print(f" [tab_status] booking_id={b.id} date={b.booking_date} time={b.booking_time} "
-         #     f"→ {tab_status} (최종 확정된 분기)")
-
-        # ── 상대방 이름 매핑 ──────────────────────────────────
+        # ── 상대방 이름 매핑 ──
         if b.user_id == user_id:
             target_mentor = db.query(Mentor).filter(Mentor.id == b.mentor_id).first()
             partner_name = target_mentor.name if target_mentor else f"멘토 #{b.mentor_id}"
@@ -402,7 +400,6 @@ def get_bookings(user_id: int, db: Session = Depends(get_db)):
         })
 
     return result
-
 # ==========================================================
 # 9. 리뷰 작성-chat.py 파일로 이동
 # ==========================================================
