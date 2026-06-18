@@ -104,9 +104,8 @@ def generate_pdf_bytes(summary: str, ai_advice: str, mentor_name: str) -> bytes:
     """
     return HTML(string=html_content).write_pdf()
 
-
 def create_and_upload_report_pdf(chat_id: int): 
-    print(f"🚀 [PDF 함수 진입] chat_id: {chat_id} 작업을 시작합니다.") # 🌟 이거 추가!
+    print(f"🚀 [PDF 함수 진입] chat_id: {chat_id} 작업을 시작합니다.")
     db = SessionLocal()
     try:
         report = (
@@ -114,9 +113,9 @@ def create_and_upload_report_pdf(chat_id: int):
             .join(ChatSession, CoffeeChatReport.chatsession_id == ChatSession.id)
             .filter(ChatSession.booking_id == chat_id)
             .first()
-            
         )
         print(f"✅ [PDF] DB 조회 완료")
+        
         if not report or not report.ai_advice:
             print(f"[PDF] chat_id={chat_id} 리포트 없음, 스킵")
             return
@@ -124,38 +123,29 @@ def create_and_upload_report_pdf(chat_id: int):
         booking = db.query(Booking).filter(Booking.id == chat_id).first()
         mentor_name = getattr(booking, "mentor_name", "멘토")
 
+        print(f"🎨 [PDF] HTML 렌더링 시작...")
+        # 🌟 중복 호출 제거하고 여기에서 한 번만 호출합니다.
         pdf_bytes = generate_pdf_bytes(
             summary=report.summary or "",
             ai_advice=report.ai_advice,
             mentor_name=mentor_name,
         )
-
-        blob_name = f"report_{chat_id}.pdf"
-        pdf_url = upload_pdf_to_azure(pdf_bytes, blob_name)
-
-        report.pdf_url = pdf_url
-        db.commit()
-        print(f"✅ [PDF] 업로드 완료: {pdf_url}")
-        print(f"🎨 [PDF] HTML 렌더링 중...")
-        pdf_bytes = generate_pdf_bytes(...)
         print(f"🎨 [PDF] 렌더링 완료, 바이트 크기: {len(pdf_bytes)} bytes")
 
         print(f"☁️ [PDF] Azure 업로드 시작...")
         blob_name = f"report_{chat_id}.pdf"
         pdf_url = upload_pdf_to_azure(pdf_bytes, blob_name)
-        print(f"☁️ [PDF] Azure 업로드 완료, URL: {pdf_url}")
-
+        
         report.pdf_url = pdf_url
         db.commit()
-        print(f"🎉 [PDF] 최종 성공! DB 저장까지 완료")
+        print(f"🎉 [PDF] 최종 성공! DB 저장 완료: {pdf_url}")
 
     except Exception as e:
-        print(f"🚨 [PDF] 진짜 범인 발견: {e}") # 🌟 여기가 핵심!
+        print(f"🚨 [PDF] 진짜 범인 발견: {e}")
         import traceback
-        traceback.print_exc() # 에러 상세 위치 출력
+        traceback.print_exc()
     finally:
         db.close()
-
 # ── 엔드포인트 ──
 
 @router.get("/api/report/pdf-url/{chat_id}")
