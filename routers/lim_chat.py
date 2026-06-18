@@ -106,6 +106,7 @@ async def llm_assistant(
             # 추천 질문 요청 처리
             if msg_type == "recommend_questions":
                 conversation = data.get("conversation", "")
+                conversation = agent_regex_masking(conversation)
                 preset_questions = data.get("preset_questions", "")
 
                 if not llm_client:
@@ -137,9 +138,11 @@ async def llm_assistant(
                     {conversation if conversation else '아직 대화 없음'}
 
                     [지침]
-                    1. 위 대화 내용을 분석해서 자연스럽게 이어질 질문 3개를 새로 작성하세요.
-                    2. 대화가 아직 없으면 일반적인 커리어 멘토링 질문을 작성하세요.
-                    3. 반드시 새로운 문장으로 작성하세요.
+                    1. 위 대화 내용 중 커리어, 직무, 업무 경험, 취업/이직 관련 내용만 참고하세요.
+                    2. 날씨, 안부, 잡담 등 멘토링 본론과 무관한 내용은 절대 참고하지 마세요.
+                    3. 의미 있는 멘토링 대화가 거의 없다면, 잡담은 무시하고 일반적인 커리어 멘토링 질문을 작성하세요.
+                    4. 대화 내용을 분석해서 자연스럽게 이어질 질문 3개를 새로 작성하세요.
+                    5. 반드시 새로운 문장으로 작성하세요. 기존 질문을 그대로 복사하지 마세요.
 
                     반드시 JSON 배열 형태로만 응답하세요.
                     예시: ["질문1", "질문2", "질문3"]"""
