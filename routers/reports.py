@@ -114,7 +114,9 @@ def create_and_upload_report_pdf(chat_id: int):
             .join(ChatSession, CoffeeChatReport.chatsession_id == ChatSession.id)
             .filter(ChatSession.booking_id == chat_id)
             .first()
+            
         )
+        print(f"✅ [PDF] DB 조회 완료")
         if not report or not report.ai_advice:
             print(f"[PDF] chat_id={chat_id} 리포트 없음, 스킵")
             return
@@ -134,12 +136,25 @@ def create_and_upload_report_pdf(chat_id: int):
         report.pdf_url = pdf_url
         db.commit()
         print(f"✅ [PDF] 업로드 완료: {pdf_url}")
+        print(f"🎨 [PDF] HTML 렌더링 중...")
+        pdf_bytes = generate_pdf_bytes(...)
+        print(f"🎨 [PDF] 렌더링 완료, 바이트 크기: {len(pdf_bytes)} bytes")
+
+        print(f"☁️ [PDF] Azure 업로드 시작...")
+        blob_name = f"report_{chat_id}.pdf"
+        pdf_url = upload_pdf_to_azure(pdf_bytes, blob_name)
+        print(f"☁️ [PDF] Azure 업로드 완료, URL: {pdf_url}")
+
+        report.pdf_url = pdf_url
+        db.commit()
+        print(f"🎉 [PDF] 최종 성공! DB 저장까지 완료")
 
     except Exception as e:
-        # 에러가 나면 파이썬 터미널에 빨간 글씨로 뜹니다!
-        print(f"🚨 [PDF] 생성/업로드 실패: {e}") 
+        print(f"🚨 [PDF] 진짜 범인 발견: {e}") # 🌟 여기가 핵심!
+        import traceback
+        traceback.print_exc() # 에러 상세 위치 출력
     finally:
-        db.close() # 🌟 작업이 끝나면 반드시 DB 연결을 닫아줍니다.
+        db.close()
 
 # ── 엔드포인트 ──
 
