@@ -106,12 +106,12 @@ def generate_pdf_bytes(summary: str, ai_advice: str, mentor_name: str) -> bytes:
 
 
 def create_and_upload_report_pdf(chat_id: int): 
-    """wrap-up 완료 후 호출 — PDF 생성 → Azure 업로드 → pdf_url DB 저장"""
-    db = SessionLocal() # 🌟 백그라운드 작업 전용 새 DB 세션을 엽니다!
+    print(f"🚀 [PDF 함수 진입] chat_id: {chat_id} 작업을 시작합니다.") # 🌟 이거 추가!
+    db = SessionLocal()
     try:
         report = (
             db.query(CoffeeChatReport)
-            .join(ChatSession, CoffeeChatReport.session_id == ChatSession.session_id)
+            .join(ChatSession, CoffeeChatReport.chatsession_id == ChatSession.id)
             .filter(ChatSession.booking_id == chat_id)
             .first()
         )
@@ -147,7 +147,7 @@ def create_and_upload_report_pdf(chat_id: int):
 async def get_pdf_url(chat_id: int, db: Session = Depends(get_db)):
     report = (
         db.query(CoffeeChatReport)
-        .join(ChatSession, CoffeeChatReport.session_id == ChatSession.session_id)
+        .join(ChatSession, CoffeeChatReport.chatsession_id == ChatSession.id)
         .filter(ChatSession.booking_id == chat_id)
         .first()
     )
