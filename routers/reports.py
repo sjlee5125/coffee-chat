@@ -63,17 +63,13 @@ def markdown_to_html(text: str) -> str:
 
 
 def generate_pdf_bytes(summary: str, ai_advice: str, mentor_name: str) -> bytes:
-    # 🌟 이모지 제거/대체 함수
+    # 🌟 이모지 완벽 삭제 로직 (정규식 사용)
     def clean_emojis(text):
         if not text: return ""
-        # 주요 이모지들을 텍스트로 대체하거나 삭제 (필요시 추가)
-        emoji_map = {
-            "💬": "[대화]", "📌": "[중요]", "🔄": "[순환]", "💡": "[Tip]", 
-            "🏃": "[액션]", "📋": "[목록]", "🔥": "[핵심]", "🍿": "[참고]", "🔭": "[전망]"
-        }
-        for emoji, text_sub in emoji_map.items():
-            text = text.replace(emoji, text_sub)
-        return text
+        # 유니코드 이모지 영역을 모두 찾아 삭제하는 정규식
+        import emoji
+        # 만약 emoji 라이브러리가 없다면 pip install emoji 해주세요
+        return emoji.replace_emoji(text, replace='')
 
     # 🌟 데이터 클리닝 적용
     summary = clean_emojis(summary)
