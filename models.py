@@ -22,7 +22,7 @@ engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-
+pdf_url = Column(String, nullable=True)
 # ─── 2. 공통 데이터 모델 정의 ───
 
 class UserRole(enum.Enum):

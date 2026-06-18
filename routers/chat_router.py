@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from models import CoffeeChatReport, ChatSession, get_db
 from .ai_service import generate_wrapup_report 
-
+from .pdf_service import create_and_upload_report_pdf
 router = APIRouter()
 
 @router.post("/api/wrap-up/{chat_id}")
@@ -47,6 +47,12 @@ async def get_wrapup_report(chat_id: int, db: Session = Depends(get_db)):
         db.commit()
         
         print(f"✅ [DB 저장 완료] AI 어드바이스 저장 완료!")
+        
+        # ========================================================
+        # 🌟 [추가 2] 방금 AI 어드바이스가 DB에 저장되었으니, 
+        # 이제 지체 없이 PDF도 만들고 Azure에 올리라고 명령합니다!
+        create_and_upload_report_pdf(db, chat_id)
+        # ========================================================
         
         # ✨ 프론트엔드가 요구하는 JSON 구조로 똑같이 맞춰서 리턴!
         return {

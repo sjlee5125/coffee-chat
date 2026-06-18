@@ -1,46 +1,162 @@
-from fastapi import APIRouter, Response, HTTPException, Depends
+import os
+import re
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
-from models import CoffeeChatReport, ChatSession, get_db
+from models import get_db, CoffeeChatReport, ChatSession, Booking
 from weasyprint import HTML
-from fastapi.responses import StreamingResponse
-import io
+from azure.storage.blob import BlobServiceClient
 
 router = APIRouter()
 
-@router.get("/api/pdf/download/{chat_id}")
-async def download_pdf(chat_id: int, db: Session = Depends(get_db)):
-    # 1. 리포트 데이터 조회
-    report = db.query(CoffeeChatReport).join(ChatSession).filter(ChatSession.booking_id == chat_id).first()
-    if not report or not report.ai_advice:
-        raise HTTPException(status_code=404, detail="리포트 데이터가 없습니다.")
+AZURE_CONNECTION_STRING = os.getenv("AZURE_CONNECTION_STRING")
+AZURE_STORAGE_ACCOUNT_NAME = os.getenv("AZURE_CONNECTION_STRING", "").split("AccountName=")[1].split(";")[0] if "AccountName=" in os.getenv("AZURE_CONNECTION_STRING", "") else "coffeechat"
+PDF_CONTAINER_NAME = "advicepdf"
 
-    # 2. PDF로 만들 HTML 템플릿 작성 (여기에 CSS를 입혀 레이아웃을 잡습니다)
+
+def upload_pdf_to_azure(pdf_bytes: bytes, blob_name: str) -> str:
+    blob_service_client = BlobServiceClient.from_connection_string(AZURE_CONNECTION_STRING)
+    container_client = blob_service_client.get_container_client(PDF_CONTAINER_NAME)
+    try:
+        container_client.create_container()
+    except Exception:
+        pass  # 이미 존재하면 무시
+    blob_client = container_client.get_blob_client(blob_name)
+    blob_client.upload_blob(pdf_bytes, overwrite=True)
+    url = f"https://{AZURE_STORAGE_ACCOUNT_NAME}.blob.core.windows.net/{PDF_CONTAINER_NAME}/{blob_name}"
+    return url
+
+
+def markdown_to_html(text: str) -> str:
+    text = re.sub(r'^### (.+)$', r'<h3>\1</h3>', text, flags=re.MULTILINE)
+    text = re.sub(r'^## (.+)$', r'<h2>\1</h2>', text, flags=re.MULTILINE)
+    text = re.sub(r'^# (.+)$', r'<h1>\1</h1>', text, flags=re.MULTILINE)
+    text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+    lines = text.split('\n')
+    result = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if '|' in line and i + 1 < len(lines) and re.match(r'^[\|\s\-:]+$', lines[i + 1]):
+            result.append('<table>')
+            headers = [h.strip() for h in line.strip('|').split('|')]
+            result.append('<thead><tr>')
+            for h in headers:
+                result.append(f'<th>{h}</th>')
+            result.append('</tr></thead><tbody>')
+            i += 2
+            while i < len(lines) and '|' in lines[i]:
+                cells = [c.strip() for c in lines[i].strip('|').split('|')]
+                result.append('<tr>')
+                for c in cells:
+                    result.append(f'<td>{c}</td>')
+                result.append('</tr>')
+                i += 1
+            result.append('</tbody></table>')
+        else:
+            if line.strip():
+                result.append(f'<p>{line}</p>')
+            else:
+                result.append('<br>')
+            i += 1
+    return '\n'.join(result)
+
+
+def generate_pdf_bytes(summary: str, ai_advice: str, mentor_name: str) -> bytes:
+    summary_html = summary.replace('\n', '<br>') if summary else ''
+    advice_html = markdown_to_html(ai_advice) if ai_advice else ''
+
     html_content = f"""
+    <!DOCTYPE html>
     <html>
-        <head>
-            <style>
-                body {{ font-family: 'Malgun Gothic', sans-serif; padding: 20px; }}
-                h1 {{ color: #1e3a8a; text-align: center; }}
-                .content {{ line-height: 1.6; color: #374151; }}
-                table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
-                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-            </style>
-        </head>
-        <body>
-            <h1>티타임 AI 분석 리포트</h1>
-            <div class="content">
-                {report.ai_advice.replace('\n', '<br>')}
-            </div>
-        </body>
+    <head>
+      <meta charset="UTF-8">
+      <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
+        * {{ font-family: 'Noto Sans KR', 'Malgun Gothic', sans-serif; box-sizing: border-box; }}
+        body {{ padding: 32px 40px; color: #1e293b; font-size: 13px; line-height: 1.8; }}
+        .header {{ border-bottom: 2px solid #312e81; padding-bottom: 16px; margin-bottom: 28px; }}
+        .header h1 {{ color: #312e81; font-size: 22px; font-weight: 900; margin: 0 0 4px 0; }}
+        .header p {{ color: #64748b; font-size: 12px; margin: 0; }}
+        .section-title {{ color: #312e81; font-size: 15px; font-weight: 700; margin: 28px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #e2e8f0; }}
+        .section-box {{ background: #f8fafc; border-radius: 8px; padding: 16px 20px; margin-bottom: 8px; white-space: pre-wrap; word-break: keep-all; }}
+        h2 {{ color: #312e81; font-size: 14px; font-weight: 700; margin: 20px 0 6px 0; }}
+        h3 {{ color: #3730a3; font-size: 13px; font-weight: 700; margin: 16px 0 4px 0; }}
+        strong {{ font-weight: 700; }}
+        table {{ width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }}
+        th {{ background: #e0e7ff; color: #312e81; font-weight: 700; padding: 8px 10px; border: 1px solid #c7d2fe; text-align: left; }}
+        td {{ padding: 7px 10px; border: 1px solid #e2e8f0; vertical-align: top; word-break: keep-all; }}
+        tr:nth-child(even) td {{ background: #f8fafc; }}
+        p {{ margin: 4px 0; }}
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1>티타임 AI 분석 리포트</h1>
+        <p>{mentor_name} 님과의 대화 분석</p>
+      </div>
+      <div class="section-title">대화 요약</div>
+      <div class="section-box">{summary_html}</div>
+      <div class="section-title">페이스메이커 어드바이스</div>
+      <div>{advice_html}</div>
+    </body>
     </html>
     """
+    return HTML(string=html_content).write_pdf()
 
-    # 3. PDF 생성
-    pdf_file = HTML(string=html_content).write_pdf()
 
-    # 4. 파일로 즉시 전달
-    return Response(
-        content=pdf_file,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=teatime_report_{chat_id}.pdf"}
+def create_and_upload_report_pdf(db: Session, chat_id: int):
+    """wrap-up 완료 후 호출 — PDF 생성 → Azure 업로드 → pdf_url DB 저장"""
+    try:
+        report = (
+            db.query(CoffeeChatReport)
+            .join(ChatSession, CoffeeChatReport.session_id == ChatSession.session_id)
+            .filter(ChatSession.booking_id == chat_id)
+            .first()
+        )
+        if not report or not report.ai_advice:
+            print(f"[PDF] chat_id={chat_id} 리포트 없음, 스킵")
+            return
+
+        booking = db.query(Booking).filter(Booking.id == chat_id).first()
+        mentor_name = booking.mentor_name if booking else "멘토"
+
+        pdf_bytes = generate_pdf_bytes(
+            summary=report.summary or "",
+            ai_advice=report.ai_advice,
+            mentor_name=mentor_name,
+        )
+
+        blob_name = f"report_{chat_id}.pdf"
+        pdf_url = upload_pdf_to_azure(pdf_bytes, blob_name)
+
+        report.pdf_url = pdf_url
+        db.commit()
+        print(f"[PDF] 업로드 완료: {pdf_url}")
+
+    except Exception as e:
+        print(f"[PDF] 생성/업로드 실패: {e}")
+
+
+# ── 엔드포인트 ──
+
+@router.get("/api/report/pdf-url/{chat_id}")
+async def get_pdf_url(chat_id: int, db: Session = Depends(get_db)):
+    report = (
+        db.query(CoffeeChatReport)
+        .join(ChatSession, CoffeeChatReport.session_id == ChatSession.session_id)
+        .filter(ChatSession.booking_id == chat_id)
+        .first()
     )
+    if not report:
+        raise HTTPException(status_code=404, detail="리포트가 없습니다.")
+    if not report.pdf_url:
+        raise HTTPException(status_code=404, detail="PDF가 아직 준비되지 않았습니다.")
+    return {"pdf_url": report.pdf_url}
+
+
+@router.post("/api/report/generate-pdf/{chat_id}")
+async def generate_pdf_manually(chat_id: int, db: Session = Depends(get_db)):
+    """수동 PDF 재생성 (테스트용)"""
+    create_and_upload_report_pdf(db, chat_id)
+    return {"message": "PDF 생성 완료"}
