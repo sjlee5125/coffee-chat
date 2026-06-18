@@ -151,13 +151,16 @@ async def get_pdf_url(chat_id: int, db: Session = Depends(get_db)):
         .filter(ChatSession.booking_id == chat_id)
         .first()
     )
+    
+    # 🌟 404 에러를 던지는 대신, 상태(status)와 함께 200 OK를 반환합니다.
     if not report:
-        raise HTTPException(status_code=404, detail="리포트가 없습니다.")
+        return {"status": "waiting", "pdf_url": None}
+        
     if not report.pdf_url:
-        raise HTTPException(status_code=404, detail="PDF가 아직 준비되지 않았습니다.")
-    return {"pdf_url": report.pdf_url}
-
-
+        return {"status": "processing", "pdf_url": None}
+        
+    # PDF가 완성되었을 때
+    return {"status": "completed", "pdf_url": report.pdf_url}
 @router.post("/api/report/generate-pdf/{chat_id}")
 async def generate_pdf_manually(chat_id: int, db: Session = Depends(get_db)):
     """수동 PDF 재생성 (테스트용)"""
