@@ -16,7 +16,7 @@ from openai import AzureOpenAI
 from auth import router
 from models import User, Mentor, Booking, MentorAvailability, ChatSession, get_db, create_tables
 import auth
-from routers import users, mentors, bookings, ai, notifications, chat, chat_router, webrtc, stt, lim_chat, pipeline, general_chat, support , announcement, chatbot, routers
+from routers import users, mentors, bookings, ai, notifications, chat, chat_router, webrtc, stt, lim_chat, pipeline, general_chat, support , announcement, chatbot,reports
 from routers.dashboard_router import router as dashboard_router_obj
 from services.scheduler import scheduler
 # 서버 실행 시 시스템의 .env 환경변수를 로드
@@ -66,6 +66,7 @@ app.include_router(bookings.router)
 app.include_router(ai.router)
 app.include_router(notifications.router)
 app.include_router(chat.router)
+app.include_router(reports.router)
 app.include_router(chat_router.router) 
 app.include_router(general_chat.router)
 app.include_router(webrtc.router)
@@ -76,7 +77,6 @@ app.include_router(support.router)
 #app.include_router(pipeline.router)
 app.include_router(announcement.router)
 app.include_router(chatbot.router, prefix="/api", tags=["Chatbot"])
-app.include_router(routers.router)
 @app.on_event("startup")
 def startup_event():
     scheduler.start()
