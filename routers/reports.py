@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from models import get_db, CoffeeChatReport, ChatSession, Booking
 from weasyprint import HTML
 from azure.storage.blob import BlobServiceClient
-
+from database import SessionLocal
 router = APIRouter()
 
 AZURE_CONNECTION_STRING = os.getenv("AZURE_CONNECTION_STRING")
@@ -105,8 +105,9 @@ def generate_pdf_bytes(summary: str, ai_advice: str, mentor_name: str) -> bytes:
     return HTML(string=html_content).write_pdf()
 
 
-def create_and_upload_report_pdf(db: Session, chat_id: int):
+def create_and_upload_report_pdf(chat_id: int): 
     """wrap-up 완료 후 호출 — PDF 생성 → Azure 업로드 → pdf_url DB 저장"""
+    db = SessionLocal() # 🌟 백그라운드 작업 전용 새 DB 세션을 엽니다!
     try:
         report = (
             db.query(CoffeeChatReport)
@@ -132,11 +133,13 @@ def create_and_upload_report_pdf(db: Session, chat_id: int):
 
         report.pdf_url = pdf_url
         db.commit()
-        print(f"[PDF] 업로드 완료: {pdf_url}")
+        print(f"✅ [PDF] 업로드 완료: {pdf_url}")
 
     except Exception as e:
-        print(f"[PDF] 생성/업로드 실패: {e}")
-
+        # 에러가 나면 파이썬 터미널에 빨간 글씨로 뜹니다!
+        print(f"🚨 [PDF] 생성/업로드 실패: {e}") 
+    finally:
+        db.close() # 🌟 작업이 끝나면 반드시 DB 연결을 닫아줍니다.
 
 # ── 엔드포인트 ──
 

@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from models import CoffeeChatReport, ChatSession, get_db
 from .ai_service import generate_wrapup_report 
-from .pdf_service import create_and_upload_report_pdf
+from .reports import create_and_upload_report_pdf
+from fastapi import BackgroundTasks
 router = APIRouter()
 
 @router.post("/api/wrap-up/{chat_id}")
-async def get_wrapup_report(chat_id: int, db: Session = Depends(get_db)):
+async def get_wrapup_report(chat_id: int, background_tasks: BackgroundTasks,db: Session = Depends(get_db)):
     print(f"🔄 [AI 랩업 리포트 생성 요청] 넘어온 URL 번호(booking_id): {chat_id}")
     
     # 1단계: booking_id로 진짜 세션 찾기
@@ -53,7 +54,7 @@ async def get_wrapup_report(chat_id: int, db: Session = Depends(get_db)):
         # 이제 지체 없이 PDF도 만들고 Azure에 올리라고 명령합니다!
         create_and_upload_report_pdf(db, chat_id)
         # ========================================================
-        
+        background_tasks.add_task(create_and_upload_report_pdf, chat_id)
         # ✨ 프론트엔드가 요구하는 JSON 구조로 똑같이 맞춰서 리턴!
         return {
             "ai_advice": ai_report,
