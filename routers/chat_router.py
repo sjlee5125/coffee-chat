@@ -25,9 +25,11 @@ async def get_wrapup_report(chat_id: int, background_tasks: BackgroundTasks,db: 
     
     # 💡 [안전장치 추가] 마스킹 데이터가 없으면 원본 텍스트라도 사용하도록 롤백 구조 생성
     text_to_analyze = report_record.stt_masked if report_record.stt_masked else chat_session.stt_text
+    # 이 두 줄을 지우거나 주석 처리합니다.
+    # if not text_to_analyze:
+    #     raise HTTPException(status_code=400, detail="분석할 대화 데이터(STT 텍스트)가 존재하지 않습니다.")
     if not text_to_analyze:
-        raise HTTPException(status_code=400, detail="분석할 대화 데이터(STT 텍스트)가 존재하지 않습니다.")
-
+        text_to_analyze = "이 대화는 텍스트 기록이 없습니다."
     # 3단계: 캐시 데이터가 이미 있다면 즉시 반환
     if report_record.ai_advice:
         print(f"💾 [캐시 사용] 이미 생성된 AI 어드바이스가 존재하여 DB 데이터를 즉시 반환합니다.")
