@@ -162,7 +162,7 @@ class CoffeeChatReport(Base):
     created_at     = Column(DateTime, server_default=func.now())
     updated_at     = Column(DateTime, server_default=func.now(), onupdate=func.now())
     masking_map    = Column(JSON, nullable=True)
-
+    pdf_url = Column(String, nullable=True)
 
 class SavedMentor(Base):
     __tablename__ = "saved_mentors"
