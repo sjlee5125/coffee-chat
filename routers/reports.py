@@ -63,6 +63,22 @@ def markdown_to_html(text: str) -> str:
 
 
 def generate_pdf_bytes(summary: str, ai_advice: str, mentor_name: str) -> bytes:
+    # 🌟 이모지 제거/대체 함수
+    def clean_emojis(text):
+        if not text: return ""
+        # 주요 이모지들을 텍스트로 대체하거나 삭제 (필요시 추가)
+        emoji_map = {
+            "💬": "[대화]", "📌": "[중요]", "🔄": "[순환]", "💡": "[Tip]", 
+            "🏃": "[액션]", "📋": "[목록]", "🔥": "[핵심]", "🍿": "[참고]", "🔭": "[전망]"
+        }
+        for emoji, text_sub in emoji_map.items():
+            text = text.replace(emoji, text_sub)
+        return text
+
+    # 🌟 데이터 클리닝 적용
+    summary = clean_emojis(summary)
+    ai_advice = clean_emojis(ai_advice)
+
     summary_html = summary.replace('\n', '<br>') if summary else ''
     advice_html = markdown_to_html(ai_advice) if ai_advice else ''
 
@@ -137,6 +153,7 @@ def create_and_upload_report_pdf(chat_id: int):
         pdf_url = upload_pdf_to_azure(pdf_bytes, blob_name)
         
         report.pdf_url = pdf_url
+        setattr(report, "pdf_url", pdf_url)
         db.commit()
         print(f"🎉 [PDF] 최종 성공! DB 저장 완료: {pdf_url}")
 
