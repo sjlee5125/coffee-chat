@@ -1,6 +1,6 @@
 import os
 import re
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from models import get_db, CoffeeChatReport, ChatSession, Booking
@@ -162,7 +162,10 @@ async def get_pdf_url(chat_id: int, db: Session = Depends(get_db)):
     # PDF가 완성되었을 때
     return {"status": "completed", "pdf_url": report.pdf_url}
 @router.post("/api/report/generate-pdf/{chat_id}")
-async def generate_pdf_manually(chat_id: int, db: Session = Depends(get_db)):
-    """수동 PDF 재생성 (테스트용)"""
-    create_and_upload_report_pdf(db, chat_id)
-    return {"message": "PDF 생성 완료"}
+async def generate_pdf_manually(chat_id: int, background_tasks: BackgroundTasks):
+    """수동 PDF 재생성 (에러 테스트용)"""
+    print(f"🛠️ [테스트] {chat_id}번 방의 PDF 강제 생성을 시작합니다...")
+    # 캐시 상관없이 무조건 PDF 생성을 백그라운드로 던집니다!
+    background_tasks.add_task(create_and_upload_report_pdf, chat_id)
+    
+    return {"message": "PDF 생성 지시 완료! 백엔드 터미널 창을 확인하세요."}
