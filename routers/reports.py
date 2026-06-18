@@ -120,7 +120,7 @@ def create_and_upload_report_pdf(chat_id: int):
             return
 
         booking = db.query(Booking).filter(Booking.id == chat_id).first()
-        mentor_name = booking.mentor_name if booking else "멘토"
+        mentor_name = getattr(booking, "mentor_name", "멘토")
 
         pdf_bytes = generate_pdf_bytes(
             summary=report.summary or "",
@@ -145,22 +145,18 @@ def create_and_upload_report_pdf(chat_id: int):
 
 @router.get("/api/report/pdf-url/{chat_id}")
 async def get_pdf_url(chat_id: int, db: Session = Depends(get_db)):
-    report = (
-        db.query(CoffeeChatReport)
-        .join(ChatSession, CoffeeChatReport.chatsession_id == ChatSession.id)
-        .filter(ChatSession.booking_id == chat_id)
-        .first()
-    )
+    report = db.query(CoffeeChatReport).join(ChatSession, CoffeeChatReport.chatsession_id == ChatSession.id).filter(ChatSession.booking_id == chat_id).first()
     
-    # 🌟 404 에러를 던지는 대신, 상태(status)와 함께 200 OK를 반환합니다.
     if not report:
         return {"status": "waiting", "pdf_url": None}
-        
-    if not report.pdf_url:
+    
+    # 🌟 getattr을 사용해 pdf_url 속성이 있는지 안전하게 확인
+    pdf_url = getattr(report, "pdf_url", None)
+    
+    if not pdf_url:
         return {"status": "processing", "pdf_url": None}
         
-    # PDF가 완성되었을 때
-    return {"status": "completed", "pdf_url": report.pdf_url}
+    return {"status": "completed", "pdf_url": pdf_url}
 @router.post("/api/report/generate-pdf/{chat_id}")
 async def generate_pdf_manually(chat_id: int, background_tasks: BackgroundTasks):
     """수동 PDF 재생성 (에러 테스트용)"""
