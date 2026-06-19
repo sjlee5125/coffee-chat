@@ -130,6 +130,7 @@ def register(request: UserRegisterRequest, db: Session = Depends(get_db)):
         help_receive=request.help_receive,
         profile_image=request.profile_image,
         phone_number=request.phone_number,
+        portfolio_file_path=request.portfolio_file_path
     )
     db.add(new_user)
     db.commit()
