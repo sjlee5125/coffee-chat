@@ -6,7 +6,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from pydantic import BaseModel
-from schemas import UserRegisterRequest
+from schemas import UserRegisterRequest, UserLoginRequest 
 # 💡 jwt 라이브러리는 jose 하나만 통일해서 사용합니다. (ExpiredSignatureError 추가)
 from jose import jwt, JWTError, ExpiredSignatureError
 from models import User, get_db, UserRole
@@ -30,20 +30,6 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
 class EmailCheckRequest(BaseModel):
     email: str
 
-class UserRegisterRequest(BaseModel):
-    email: str
-    password: str
-    role: str
-    name: str
-    phone_number: str
-    bio: str = None
-    mbti: str = None
-    hashtags: str = None
-    experience: str = None
-    portfolio_url: str = None
-    help_provide: str = None
-    help_receive: str = None
-    profile_image: str = None
 
 class UserLoginRequest(BaseModel):
     email: str
