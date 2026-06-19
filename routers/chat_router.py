@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from models import CoffeeChatReport, ChatSession, get_db, Booking
 from .ai_service import generate_wrapup_report 
 from .reports import create_and_upload_report_pdf
-
+from .ai_service import generate_wrapup_report, generate_summary
 router = APIRouter()
 
 @router.post("/api/wrap-up/{chat_id}")
@@ -54,33 +54,42 @@ async def get_wrapup_report(chat_id: int, background_tasks: BackgroundTasks, db:
         print("⚠️ [재생성 시작] '정보 부족' 문구가 감지되어 캐시를 무시하고 AI를 다시 호출합니다!")
     # 4단계: AI 어드바이스 생성 및 DB 저장
     try:
-        print(f"🤖 [LLM 호출] 데이터를 기반으로 어드바이스 생성을 시작합니다...")
+        print(f"🤖 [LLM 호출] 데이터를 기반으로 재생성을 시작합니다...")
         
         booking = db.query(Booking).filter(Booking.id == chat_id).first()
         h_name = booking.mentor_name if booking else "멘토"
-        g_name = booking.user_name if booking else "멘티" # (모델에 따라 필드명이 user_name 또는 guest_name일 수 있습니다)
+        g_name = booking.user_name if booking else "멘티"
 
+        # 1. 어드바이스 재생성
         ai_report = generate_wrapup_report(
             host_text=text_to_analyze, 
             guest_text="",
             host_name=h_name,
             guest_name=g_name
-)
+        )
         
-        # DB에 저장
+        # 2. 🌟 대화 요약 재생성 (요약이 망가졌을 경우에만 다시 실행!)
+        if is_failed_report:
+            print("📝 [요약 재생성] 요약에 '정보 부족'이 감지되어 대화 요약도 다시 생성합니다!")
+            
+            # (주의: generate_summary 함수명과 넘겨주는 인자는 ai_service.py에 맞게 조절해 주세요!)
+            new_summary = generate_summary(text_to_analyze) 
+            
+            # 새롭게 만든 요약을 DB 레코드에 덮어씁니다.
+            report_record.summary = new_summary
+        
+        # DB에 어드바이스 덮어쓰기
         report_record.ai_advice = ai_report
         db.commit()
         
-        print(f"✅ [DB 저장 완료] AI 어드바이스 저장 완료!")
+        print(f"✅ [DB 저장 완료] AI 어드바이스 및 요약 저장 완료!")
         
-        # 🌟 [수정 2] 응답을 가로막던 동기식 create_and_upload_report_pdf(db, chat_id) 호출은 과감히 삭제합니다!
-        # 오직 background_tasks를 통해서만 조용히 일하게 만들어 유저에게 0.1초 만에 완료 JSON을 보냅니다.
         background_tasks.add_task(create_and_upload_report_pdf, chat_id)
         
-        # ✨ 프론트엔드가 요구하는 JSON 구조로 똑같이 맞춰서 리턴!
+        # ✨ 이제 화면에 방금 새로 만든 똑똑한 요약본이 전달됩니다!
         return {
-            "ai_advice": ai_report,
-            "summary": report_record.summary
+            "ai_advice": report_record.ai_advice,
+            "summary": report_record.summary 
         }
 
     except Exception as e:
