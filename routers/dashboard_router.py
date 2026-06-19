@@ -27,20 +27,33 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
     this_month_start = today.replace(day=1)
 
     FIXED_PRICE = 15000
+    
+    # 1. 이번 달 완료/확정된 예약 건수
     monthly_bookings_count = (
         db.query(func.count(Booking.id))
         .filter(
             Booking.mentor_id == mentor.id,
-            Booking.status.in_(["PAID", "CONFIRMED"]), # 확정/결제 완료 모두 집계
+            Booking.status.in_(["PAID", "CONFIRMED", "COMPLETED"]), # COMPLETED 추가
             Booking.booking_date >= this_month_start,
         )
         .scalar() or 0
     )
     monthly_earnings = monthly_bookings_count * FIXED_PRICE
 
+    # 2. 전체 완료/확정된 예약 건수 (시간 계산용)
+    total_bookings_count = (
+        db.query(func.count(Booking.id))
+        .filter(
+            Booking.mentor_id == mentor.id,
+            Booking.status.in_(["PAID", "CONFIRMED", "COMPLETED"])
+        )
+        .scalar() or 0
+    )
+
     avg_rating_row = db.query(func.avg(Review.rating)).filter(Review.mentor_id == mentor.id).scalar()
     average_rating = round(float(avg_rating_row), 1) if avg_rating_row else 0.0
 
+    # 3. 채팅 세션으로 시간 계산 시도
     total_seconds = (
         db.query(
             func.sum(
@@ -50,7 +63,12 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
         .filter(ChatSession.mentor_id == mentor.id)
         .scalar() or 0
     )
-    mentoring_hours = round(total_seconds / 3600, 1)
+    
+    # 💡 만약 채팅방 로직을 아직 안 타서 ChatSession 데이터가 없다면, 예약 1건당 30분(0.5시간)으로 자동 계산!
+    if total_seconds == 0 and total_bookings_count > 0:
+        mentoring_hours = total_bookings_count * 0.5
+    else:
+        mentoring_hours = round(total_seconds / 3600, 1)
 
     total_users = db.query(func.count(func.distinct(Booking.user_id))).filter(Booking.mentor_id == mentor.id).scalar() or 0
     rebooking_users = (
@@ -70,7 +88,7 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
         .join(User, User.id == Booking.user_id)
         .filter(
             Booking.mentor_id == mentor.id,
-            Booking.status.in_(["PAID", "CONFIRMED"]), # 💡 PENDING은 제외
+            Booking.status.in_(["PAID", "CONFIRMED"]), 
             (Booking.booking_date > today) | 
             ((Booking.booking_date == today) & (Booking.booking_time >= current_time_str))
         )
@@ -89,7 +107,6 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
     ]
 
     review_rows = (
-        # ⭕ Review.review 로 변경! (DB 컬럼명과 일치시킴)
         db.query(User.name, Review.rating, Review.created_at, Review.review) 
         .select_from(Review)
         .join(User, User.id == Review.user_id)
@@ -103,7 +120,7 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
         {
             "mentee_name": row.name,
             "rating": row.rating,
-            "content": row.review, # 이건 잘 작성하셨습니다!
+            "content": row.review, 
             "created_at": row.created_at.isoformat() if row.created_at else None,
         }
         for row in review_rows
@@ -112,17 +129,18 @@ def mentor_dashboard(user_id: int, db: Session = Depends(get_db)):
     return {
         "stats": {
             "name": user.name if user else mentor.name,
-            "monthly_earnings": monthly_earnings, # 💡 프론트엔드가 요구하는 키값
-            "monthly_session_count": monthly_bookings_count,
+            # 🌟 [프론트엔드와 완벽하게 일치시키는 핵심 키값들]
+            "monthly_earnings": monthly_earnings,  
+            "revenue": monthly_earnings,           
+            "mentoring_hours": mentoring_hours,    
+            "hours": mentoring_hours,              
+            "total_chats": total_bookings_count,   
             "average_rating": average_rating,
-            "mentoring_hours": mentoring_hours,
             "rebooking_rate": rebooking_rate,
         },
         "upcoming_chats": upcoming_chats,
         "recent_reviews": recent_reviews,
     }
-
-
 # ════════════════════════════════════════════════════════════════
 #  멘티 대시보드
 # ════════════════════════════════════════════════════════════════
