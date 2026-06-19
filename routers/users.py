@@ -54,32 +54,34 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
         
     is_mentor = mentor is not None
 
+    # 🌟 [교차 복구 안전장치] 만약 User나 Mentor 테이블 한쪽에만 파일 경로가 있고 다른 쪽에 비어 있다면 상호 동기화 유추
+    final_file_path = user.portfolio_file_path or ""
+    if not final_file_path and mentor and hasattr(mentor, "portfolio_file_path") and mentor.portfolio_file_path:
+        final_file_path = mentor.portfolio_file_path
+
     return {
         "id": user.id,
         "email": user.email,
         "name": user.name,
-        
-        # 💡 [핵심 추가] 프론트엔드 공지사항에서 권한 체크를 할 수 있도록 role을 명시해줍니다!
-        # Enum 타입일 경우 문자열 값(.value)을 추출하도록 안전하게 처리합니다.
         "role": user.role.value if hasattr(user.role, "value") else str(user.role),
-        
         "bio": user.bio or "",
         "mbti": user.mbti or "",
         "hashtags": user.hashtags or "",
         "experience": user.experience or "",
         "portfolio_url": user.portfolio_url or "",
-        "portfolio_file_path": user.portfolio_file_path or "",
+        
+        # 🌟 상호 보완된 통합 파일 경로 반환 처리로 화면 소멸 방지
+        "portfolio_file_path": final_file_path,
+        
         "help_provide": user.help_provide or "",
         "help_receive": user.help_receive or "",
         "profile_image": user.profile_image or "",
         "phone_number": user.phone_number or "", 
         
-        # 🌟 프론트엔드로 직무 정보 보내주기
         "main_category": getattr(mentor, "main_category", "") if mentor else "",
         "sub_category": getattr(mentor, "sub_category", "") if mentor else "",
         "status": getattr(mentor, "status", "") if mentor else "",
         
-        # 호스트 화면으로 꼽아줄 데이터들 완벽 조회
         "job_title": mentor.job_title if mentor else "",
         "mentor_intro": m_intro,
         "career_history": mentor.career_history if mentor else "[]",
@@ -87,7 +89,6 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
         "detailed_experience": mentor.detailed_experience if mentor else "[]",
         "mentor_keywords": m_keywords, 
         "mentor_links": m_links,
-        
         "is_mentor": is_mentor
     }
 @router.post("/{user_id}/profile-image")
@@ -146,8 +147,10 @@ def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session
     user.help_provide = request.help_provide
     user.help_receive = request.help_receive
     user.phone_number = request.phone_number 
+    
+    # 🌟 User 테이블 기입 보장
     user.portfolio_file_path = request.portfolio_file_path
-    # 안전장치: 빈 값이 아닐 때만 프로필 이미지를 덮어씁니다.
+
     if request.profile_image and request.profile_image.startswith("http"):
         user.profile_image = request.profile_image
 
@@ -157,7 +160,6 @@ def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session
         mentor = Mentor(user_id=user_id)
         db.add(mentor)
 
-    # 프론트엔드가 보낸 직무 정보를 DB에 꽂아 넣기
     if hasattr(request, "main_category"):
         mentor.main_category = request.main_category
     if hasattr(request, "sub_category"):
@@ -171,18 +173,20 @@ def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session
     mentor.career_history = request.career_history if request.career_history else "[]"
     mentor.detailed_experience = request.detailed_experience if request.detailed_experience else "[]"
     
-    # 해시태그 안전 동기화
+    # 🌟🌟🌟 [양방향 동기화] 만약 Mentor 모델 명세에 동일한 파일 경로 컬럼이 설계되어 있다면 동시 기입
+    if hasattr(mentor, "portfolio_file_path"):
+        mentor.portfolio_file_path = request.portfolio_file_path
+
     if request.mentoring_topics and request.mentoring_topics != "[]":
         mentor.mentoring_topics = request.mentoring_topics
     elif request.hashtags:
         tags = [t.strip() for t in request.hashtags.split() if t.strip()]   
         mentor.mentoring_topics = json.dumps(tags)
 
-    # 🚀 [핵심 수정] 여기서 mentor_keywords와 mentor_links를 꺼내서 DB 엔티티에 직접 할당해야 합니다!
     if hasattr(request, "mentor_keywords") and request.mentor_keywords:
         mentor.mentor_keywords = request.mentor_keywords
     else:
-        mentor.mentor_keywords = "[]" # 비어있다면 빈 배열 저장
+        mentor.mentor_keywords = "[]"
 
     if hasattr(request, "mentor_links") and request.mentor_links:
         mentor.mentor_links = request.mentor_links
