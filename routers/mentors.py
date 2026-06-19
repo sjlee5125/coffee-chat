@@ -379,3 +379,29 @@ def apply_mentor_penalty(request: PenaltyRequest, db: Session = Depends(get_db))
 
     db.commit()
     return {"message": "예약이 취소되었으며 패널티가 부여되었습니다.", "booking_id": booking.id}
+    @router.get("/api/mentor/penalties/{mentor_id}")
+def get_mentor_penalties(mentor_id: int, db: Session = Depends(get_db)):
+    """해당 멘토가 취소해서 패널티를 받은 내역을 조회합니다."""
+    
+    try:
+        # Booking 테이블에서 해당 멘토의 예약 중, 패널티가 부여된(True) 것만 쏙 골라옵니다.
+        penalties = db.query(Booking).filter(
+            Booking.mentor_id == mentor_id,
+            Booking.penalty_applied == True,
+            Booking.cancelled_by == "mentor"
+        ).all()
+        
+        # 프론트엔드 캘린더가 찰떡같이 알아듣도록 데이터를 포장해서 보냅니다.
+        result = [
+            {
+                "date": str(p.booking_date), 
+                "time": p.booking_time, 
+                "reason": "호스트 취소 패널티"
+            } for p in penalties
+        ]
+        
+        return result
+
+    except Exception as e:
+        print(f"❌ [패널티 내역 조회 에러]: {str(e)}")
+        return []
