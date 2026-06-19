@@ -1,4 +1,5 @@
 import os
+import re # 🌟 정규식을 위해 추가
 from dotenv import load_dotenv
 from openai import AzureOpenAI
 
@@ -8,20 +9,41 @@ load_dotenv()
 # 2. .env에서 진짜 키 값을 꺼내와서 AZURE_API_KEY 변수에 담아줍니다.
 AZURE_API_KEY = os.getenv("AZURE_API_KEY")
 
-# ---- (여기서부터는 기존 코드와 거의 동일해!) ----
 AZURE_ENDPOINT = "https://teatimes.cognitiveservices.azure.com/openai/deployments/ai_advice/chat/completions?api-version=2025-01-01-preview"
 API_VERSION = "2024-12-01-preview"
 DEPLOYMENT_NAME = "ai_advice" 
 
-
-# 3. 위에서 만든 AZURE_API_KEY가 여기에 아주 자연스럽게 들어갑니다.
 client = AzureOpenAI(
-     api_key=AZURE_API_KEY,
-     api_version=API_VERSION,
-     azure_endpoint=AZURE_ENDPOINT
- )
+    api_key=AZURE_API_KEY,
+    api_version=API_VERSION,
+    azure_endpoint=AZURE_ENDPOINT
+)
 
-def generate_wrapup_report(host_text: str, guest_text: str) -> str:
+# =====================================================================
+# 🌟 [신규 추가] 화자 이름 자동 치환 함수
+# =====================================================================
+def clean_stt_for_ai(raw_text: str, host_name: str, guest_name: str) -> str:
+    if not raw_text:
+        return ""
+    
+    # 멘토(Host) 이름 치환 (예: "이승재:" -> "Host:")
+    if host_name:
+        raw_text = re.sub(rf'{re.escape(host_name)}:\s*', 'Host: ', raw_text, flags=re.MULTILINE)
+    
+    # 멘티(Guest) 이름 치환 (예: "김철수:" -> "Guest:")
+    if guest_name:
+        raw_text = re.sub(rf'{re.escape(guest_name)}:\s*', 'Guest: ', raw_text, flags=re.MULTILINE)
+        
+    return raw_text
+# =====================================================================
+
+# 🌟 [수정] host_name과 guest_name을 파라미터로 추가로 받습니다.
+def generate_wrapup_report(host_text: str, guest_text: str, host_name: str = "멘토", guest_name: str = "멘티") -> str:
+    
+    # 🌟 AI에게 넘기기 직전에 STT 데이터를 청소(치환)합니다!
+    cleaned_host_text = clean_stt_for_ai(host_text, host_name, guest_name)
+    cleaned_guest_text = clean_stt_for_ai(guest_text, host_name, guest_name)
+
     system_prompt = """
     # Role
     당신은 커피챗 매칭 플랫폼 'TeaTimes'의 [커리어 페이스메이커(Pacemaker)]입니다. 
@@ -81,7 +103,8 @@ def generate_wrapup_report(host_text: str, guest_text: str) -> str:
             model=DEPLOYMENT_NAME,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Host_Text: {host_text}\n\nGuest_Text: {guest_text}"}
+                # 🌟 청소된 데이터를 프롬프트에 넣습니다.
+                {"role": "user", "content": f"Host_Text: {cleaned_host_text}\n\nGuest_Text: {cleaned_guest_text}"}
             ],
             max_tokens=4096,
             temperature=0.7

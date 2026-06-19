@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from models import CoffeeChatReport, ChatSession, get_db
+from models import CoffeeChatReport, ChatSession, get_db, Booking
 from .ai_service import generate_wrapup_report 
 from .reports import create_and_upload_report_pdf
 
@@ -46,7 +46,16 @@ async def get_wrapup_report(chat_id: int, background_tasks: BackgroundTasks, db:
     try:
         print(f"🤖 [LLM 호출] 데이터를 기반으로 어드바이스 생성을 시작합니다...")
         
-        ai_report = generate_wrapup_report(host_text=text_to_analyze, guest_text="")
+        booking = db.query(Booking).filter(Booking.id == chat_id).first()
+        h_name = booking.mentor_name if booking else "멘토"
+        g_name = booking.user_name if booking else "멘티" # (모델에 따라 필드명이 user_name 또는 guest_name일 수 있습니다)
+
+        ai_report = generate_wrapup_report(
+            host_text=text_to_analyze, 
+            guest_text="",
+            host_name=h_name,
+            guest_name=g_name
+)
         
         # DB에 저장
         report_record.ai_advice = ai_report
