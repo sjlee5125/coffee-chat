@@ -379,7 +379,7 @@ def apply_mentor_penalty(request: PenaltyRequest, db: Session = Depends(get_db))
 
     db.commit()
     return {"message": "예약이 취소되었으며 패널티가 부여되었습니다.", "booking_id": booking.id}
-    @router.get("/api/mentor/penalties/{mentor_id}")
+@router.get("/api/mentor/penalties/{mentor_id}")
 def get_mentor_penalties(mentor_id: int, db: Session = Depends(get_db)):
     """해당 멘토가 취소해서 패널티를 받은 내역을 조회합니다."""
     
