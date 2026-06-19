@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from models import CoffeeChatReport, ChatSession, get_db, Booking
-from .ai_service import generate_wrapup_report 
+from models import CoffeeChatReport, ChatSession, get_db, Booking, User, Mentor
 from .reports import create_and_upload_report_pdf
 from .ai_service import generate_wrapup_report, generate_summary
 router = APIRouter()
@@ -57,22 +56,39 @@ async def get_wrapup_report(chat_id: int, background_tasks: BackgroundTasks, db:
         print(f"🤖 [LLM 호출] 데이터를 기반으로 재생성을 시작합니다...")
         
         booking = db.query(Booking).filter(Booking.id == chat_id).first()
-        h_name = booking.mentor_name if booking else "멘토"
-        g_name = booking.user_name if booking else "멘티"
-
-        # 1. 어드바이스 재생성
+        
+        h_name = "멘토"
+        g_name = "멘티"
+        
+        if booking:
+            # 1. 멘티(Guest) 이름 가져오기
+            guest = db.query(User).filter(User.id == booking.user_id).first()
+            if guest:
+                g_name = guest.name
+                
+            # 2. 멘토(Host) 이름 가져오기
+            mentor_record = db.query(Mentor).filter(Mentor.id == booking.mentor_id).first()
+            if mentor_record:
+                mentor_user = db.query(User).filter(User.id == mentor_record.user_id).first()
+                if mentor_user:
+                    h_name = mentor_user.name
+                    
+        # =================================================================
+        # 🌟 [수정된 부분] 1. 어드바이스 생성 함수를 꼭 호출해야 합니다! (빠져있던 부분)
+        # =================================================================
         ai_report = generate_wrapup_report(
             host_text=text_to_analyze, 
             guest_text="",
             host_name=h_name,
             guest_name=g_name
         )
-        
+
         # 2. 🌟 대화 요약 재생성 (요약이 망가졌을 경우에만 다시 실행!)
         if is_failed_report:
             print("📝 [요약 재생성] 요약에 '정보 부족'이 감지되어 대화 요약도 다시 생성합니다!")
             
-            # (주의: generate_summary 함수명과 넘겨주는 인자는 ai_service.py에 맞게 조절해 주세요!)
+            # 여기서도 화자 이름을 치환해서 넘겨주면 요약 품질이 훨씬 좋아집니다!
+            # (만약 clean_stt_for_ai를 라우터에서 못 부른다면 그냥 text_to_analyze를 넣으셔도 됩니다)
             new_summary = generate_summary(text_to_analyze) 
             
             # 새롭게 만든 요약을 DB 레코드에 덮어씁니다.
