@@ -29,10 +29,17 @@ async def get_wrapup_report(chat_id: int, background_tasks: BackgroundTasks, db:
         text_to_analyze = "이 대화는 텍스트 기록이 없습니다."
 
     # 3단계: 캐시 데이터가 이미 있다면 즉시 반환 (+ PDF 누락 시 백그라운드 생성 트리거)
-    if report_record.ai_advice:
-        print(f"💾 [캐시 사용] 이미 생성된 AI 어드바이스가 존재하여 DB 데이터를 즉시 반환합니다.")
+    is_failed_report = False
+    if report_record.ai_advice and "정보 부족" in report_record.ai_advice:
+        is_failed_report = True
+    if report_record.summary and "정보 부족" in report_record.summary:
+        is_failed_report = True
+
+    # 기존에 분석된 글자가 있고, '정보 부족'이 아니라면 캐시(기존 데이터)를 그대로 씁니다.
+    if report_record.ai_advice and not is_failed_report:
+        print(f"💾 [캐시 사용] 정상적인 리포트가 존재하여 DB 데이터를 즉시 반환합니다.")
         
-        # 🌟 [수정 1] 이미 분석 글자는 DB에 있지만, PDF 파일이 없다면 백그라운드로 즉시 생성 시작!
+        # 글자는 있는데 PDF가 없다면 백그라운드로 PDF만 굽기 시작!
         if not report_record.pdf_url:
             print(f"🛠️ 어드바이스 캐시는 있지만 PDF가 누락되어 백그라운드 생성을 트리거합니다.")
             background_tasks.add_task(create_and_upload_report_pdf, chat_id)
@@ -41,7 +48,10 @@ async def get_wrapup_report(chat_id: int, background_tasks: BackgroundTasks, db:
             "ai_advice": report_record.ai_advice,
             "summary": report_record.summary
         }
-
+    
+    # 만약 '정보 부족'이라면 아래로 통과시켜서 4단계(AI 재호출)를 실행하게 만듭니다.
+    if is_failed_report:
+        print("⚠️ [재생성 시작] '정보 부족' 문구가 감지되어 캐시를 무시하고 AI를 다시 호출합니다!")
     # 4단계: AI 어드바이스 생성 및 DB 저장
     try:
         print(f"🤖 [LLM 호출] 데이터를 기반으로 어드바이스 생성을 시작합니다...")
