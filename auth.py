@@ -6,7 +6,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from pydantic import BaseModel
-
+from schemas import UserRegisterRequest
 # 💡 jwt 라이브러리는 jose 하나만 통일해서 사용합니다. (ExpiredSignatureError 추가)
 from jose import jwt, JWTError, ExpiredSignatureError
 from models import User, get_db, UserRole
