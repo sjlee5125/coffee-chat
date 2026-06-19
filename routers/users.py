@@ -191,3 +191,45 @@ def update_user_profile(user_id: int, request: ProfileUpdateRequest, db: Session
 
     db.commit()
     return {"message": "프로필 정보가 성공적으로 바인딩되었습니다."}
+@router.post("/upload/portfolio")
+async def upload_portfolio(file: UploadFile = File(...)):
+    """포트폴리오 파일을 Azure 'portfoliofile' 컨테이너에 업로드하고 URL을 반환합니다."""
+    
+    if not AZURE_CONNECTION_STRING:
+        raise HTTPException(status_code=500, detail="Azure Storage 설정 오류")
+
+    try:
+        # 🌟 요청하신 포트폴리오 전용 컨테이너 이름
+        PORTFOLIO_CONTAINER = "portfoliofile"
+
+        # 파일명 중복 방지를 위한 UUID 추가
+        file_extension = file.filename.split(".")[-1]
+        unique_filename = f"portfolio_{uuid.uuid4().hex[:8]}.{file_extension}"
+
+        # Azure 접속 및 컨테이너 객체 생성
+        blob_service_client = BlobServiceClient.from_connection_string(AZURE_CONNECTION_STRING)
+        container_client = blob_service_client.get_container_client(PORTFOLIO_CONTAINER)
+        
+        # 만약 portfoliofile 컨테이너가 없다면 자동으로 만들어줍니다
+        if not container_client.exists():
+            container_client.create_container()
+
+        # 업로드 준비
+        blob_client = container_client.get_blob_client(unique_filename)
+        contents = await file.read()
+        
+        # 🚀 Azure에 실제 파일 업로드!
+        blob_client.upload_blob(contents, overwrite=True)
+
+        # 업로드된 최종 URL 가져오기
+        file_url = blob_client.url
+
+        # 프론트엔드로 URL 리턴
+        return {
+            "message": "포트폴리오 파일이 성공적으로 업로드되었습니다.", 
+            "url": file_url
+        }
+
+    except Exception as e:
+        print(f"❌ [Azure 포트폴리오 업로드 에러]: {str(e)}")
+        raise HTTPException(status_code=500, detail="포트폴리오 업로드에 실패했습니다.")
