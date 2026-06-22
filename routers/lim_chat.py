@@ -209,28 +209,27 @@ async def llm_assistant(websocket: WebSocket, booking_id: int, user_id: int):
 async def generate_summary(chat_id: int):
     print(f"🚀 [{chat_id}번 방] 종료 버튼 클릭 감지! 요약본 생성 파이프라인 시작...")
 
-    # 실제 서비스에서는 DB에서 대화 내용을 불러옵니다.
-    # 예시 가짜 데이터
+    # (이 부분은 나중에 실제 DB에서 대화 내용을 가져오는 코드로 바꾸시면 됩니다)
     raw_text = """
     Host: 안녕하세요 이다은 님, 한국대학교 졸업하시고 스타브릿지 엔터테인먼트에 입사하셨다고 들었어요. 연락처는 010-1234-5678 맞으시죠?
     Guest: 네 맞습니다. 제 개인 메일 daeun.lee@gmail.com 로도 자료 부탁드릴게요. 연봉 8천만 원 받기로 했습니다.
     """
 
     try:
-        # 💡 [핵심] pipeline.py에서 MaskingEngine 클래스를 통째로 가져옵니다!
         from routers.pipeline import MaskingEngine, agent_llm_summary
+        import json
         
         # 1. 단일 마스킹 엔진 생성 (이 엔진이 매핑 딕셔너리를 기억합니다)
         engine = MaskingEngine()
         
-        # 2. 가명화 처리 (engine 내부 변수에 '[조직_1]': '스타브릿지...' 기록됨)
+        # 2. 가명화 처리
         step0_text = engine.apply_regex(raw_text)
         step1_text = engine.apply_azure_ner(step0_text)
         
         # 3. 마스킹된 텍스트로 요약 수행
         final_json_str = agent_llm_summary(step1_text)
 
-        # 🔥 4. [가장 중요한 부분] 생성된 요약본에서 '[조직_1]'을 다시 원본으로 복구합니다!
+        # 4. 생성된 요약본에서 원본으로 복구합니다!
         restored_json_str = engine.demask_text(final_json_str)
 
         # 5. 복구 완료된 텍스트를 JSON으로 파싱하여 프론트에 반환
@@ -241,6 +240,7 @@ async def generate_summary(chat_id: int):
 
     except Exception as e:
         print(f"🚨 파이프라인 에러 발생: {e}")
+        from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=f"요약본 생성 중 서버 에러: {str(e)}")
 
 
