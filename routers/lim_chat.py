@@ -225,10 +225,10 @@ async def generate_summary(chat_id: int, request: Request, db: Session = Depends
         final_json_str = final_json_str.replace("```json", "").replace("```", "").strip()
         print(f"🔎 masking_map: {engine.masking_map}")
         print(f"🔎 LLM 출력(복구 전) 일부: {final_json_str[:300]}")
-
+        restored_json_str = engine.demask_text(final_json_str)
         print(f"🔎 복구 후 일부: {restored_json_str[:300]}")
         # ✅ 반드시 demask 후 파싱 — 이게 빠져있었던 것
-        restored_json_str = engine.demask_text(final_json_str)
+
         parsed = json.loads(restored_json_str)
 
         # 나머지 저장 로직은 그대로...
