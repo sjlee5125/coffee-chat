@@ -17,20 +17,38 @@ router = APIRouter(tags=["Mentors"])
 async def get_recommended_mentors(user_id: int, db: Session = Depends(get_db)):
     try:
         current_user = db.query(User).filter(User.id == user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="존재하지 않는 사용자입니다.")
         
-        # 💡 [성능 최적화] User와 Mentor를 한 번의 쿼리로 JOIN해서 가져옵니다 (N+1 문제 해결)
+        # 🌟 [핵심 해결] 로그인한 유저의 멘토 정보도 함께 조회합니다.
+        current_mentor = db.query(Mentor).filter(Mentor.user_id == user_id).first()
+        
+        # 💡 일반 유저(멘티)라면 calc_match_score 내부에서 멘토 필드를 참조할 때 
+        # AttributeError가 나지 않도록 빈 기본값들을 객체에 속성으로 심어줍니다.
+        if not current_mentor:
+            setattr(current_user, "job_title", "일반 회원")
+            setattr(current_user, "main_category", "")
+            setattr(current_user, "sub_category", "")
+            setattr(current_user, "mentoring_topics", "[]")
+            setattr(current_user, "career_history", "[]")
+            setattr(current_user, "detailed_experience", "[]")
+        else:
+            # 로그인한 유저가 멘토라면, 본인의 멘토 필드들을 유저 객체에 직접 동기화해 줍니다.
+            setattr(current_user, "job_title", current_mentor.job_title)
+            setattr(current_user, "main_category", current_mentor.main_category)
+            setattr(current_user, "sub_category", current_mentor.sub_category)
+            setattr(current_user, "mentoring_topics", current_mentor.mentoring_topics)
+            setattr(current_user, "career_history", current_mentor.career_history)
+            setattr(current_user, "detailed_experience", current_mentor.detailed_experience)
+
+        # 추천 대상이 될 다른 멘토 목록 조회
         results = db.query(User, Mentor).join(Mentor, User.id == Mentor.user_id).filter(User.id != user_id).all()
 
         scored_mentors = []
         for user, m_info in results:
-            # 🌟 [추천 로직 강화]
-            # 멘티(current_user)의 "주요 이력 및 경력(experience)",
-            # "도움을 줄 수 있는 분야(help_provide)", "배우고 싶은 분야(help_receive)"를
-            # 멘토의 프로필(m_info: mentoring_topics/career_history/job_title 등)과
-            # 함께 비교할 수 있도록 m_info(Mentor)를 같이 전달합니다.
+            # 🚀 이제 일반 회원이 로그인해도 에러 없이 유연하게 매칭 점수가 정상 계산됩니다!
             score, reasons = calc_match_score(current_user, user, m_info) if current_user else (0, [])
             
-            # User 테이블에서 help_provide 데이터를 리스트로 파싱합니다.
             tech_stack = []
             if getattr(user, "help_provide", None):
                 tech_stack = [tech.strip() for tech in user.help_provide.split(",") if tech.strip()]
@@ -59,7 +77,6 @@ async def get_recommended_mentors(user_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         print(f"🚨 get_recommended_mentors 에러: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.get("/api/mentors")
 def get_mentors(db: Session = Depends(get_db)):
