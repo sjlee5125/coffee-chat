@@ -19,7 +19,7 @@ class UserRegisterRequest(BaseModel):
     help_receive: Optional[str] = None
     profile_image: Optional[str] = None
     portfolio_file_path: Optional[str] = None
-
+    phone_number: Optional[str] = None
 class UserLoginRequest(BaseModel):
     """일반 로그인 검증용 가방 데이터 명세"""
     email: str
