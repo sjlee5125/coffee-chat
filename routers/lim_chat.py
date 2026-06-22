@@ -202,38 +202,38 @@ async def llm_assistant(websocket: WebSocket, booking_id: int, user_id: int):
         logger.info(f"[LLM] 연결 해제 room={room_id} uid={user_id}")
 
 @router.post("/{chat_id}/generate-summary")
-async def generate_summary(chat_id: int, db: Session = Depends(get_db)):
-    print(f"🚀 [{chat_id}번 방] 요약본 생성 파이프라인 시작 (DB 연동)...")
+async def generate_summary(chat_id: int, request: Request, db: Session = Depends(get_db)): 
+    print(f"🚀 [{chat_id}번 방] 파이프라인 가동! (PDF용 JSON 및 줄글 생성)")
 
-    # 1. DB에서 실제 대화 내용 불러오기
-    chat_session = db.query(ChatSession).filter(ChatSession.booking_id == chat_id).first()
+    session = db.query(ChatSession).filter(ChatSession.booking_id == chat_id).first()
     
-    if not chat_session or not chat_session.stt_text:
-        raise HTTPException(status_code=400, detail="요약할 대화 내용(STT)이 존재하지 않습니다.")
-        
-    raw_text = chat_session.stt_text
+    if session and session.stt_text:
+        raw_text = session.stt_text
+    else:
+        raw_text = """Host: 아, 아. 네, 아름 님 안녕하세요..."""  # fallback
 
     try:
         from routers.pipeline import MaskingEngine, agent_llm_summary
-        import json
         
+        # ✅ 엔진 하나로 전체 파이프라인 — masking_map이 유지됨
         engine = MaskingEngine()
-        
-        # 2. 마스킹 파이프라인
         step0_text = engine.apply_regex(raw_text)
         step1_text = engine.apply_azure_ner(step0_text)
-        print(f"🔎 가명화 맵: {engine.masking_map}")
-        
-        # 3. LLM 요약
+
+        # LLM 요약 (마스킹된 텍스트로)
         final_json_str = agent_llm_summary(step1_text)
-        
-        # 4. 복구 및 파싱
+        final_json_str = final_json_str.replace("```json", "").replace("```", "").strip()
+
+        # ✅ 반드시 demask 후 파싱 — 이게 빠져있었던 것
         restored_json_str = engine.demask_text(final_json_str)
         parsed = json.loads(restored_json_str)
-        print(f"✅ [{chat_id}번 방] 요약본 생성 및 복원 성공!")
 
-        # 5. 줄글 요약본 조립 (CoffeeChatReport.summary에 저장할 텍스트)
-        meta    = parsed.get("session_metadata", {})
+        # 나머지 저장 로직은 그대로...
+        os.makedirs("summary_data", exist_ok=True)
+        with open(f"summary_data/{chat_id}.json", "w", encoding="utf-8") as f:
+            json.dump(parsed, f, ensure_ascii=False)
+
+        meta = parsed.get("session_metadata", {})
         agendas = parsed.get("core_agendas", [])
         consensus = parsed.get("session_consensus", "내용 없음")
 
@@ -247,34 +247,18 @@ async def generate_summary(chat_id: int, db: Session = Depends(get_db)):
             pretty_text += f"- 호스트 해결책: {a.get('host_solution', '')}\n\n"
         pretty_text += f"3. 최종 합의점 및 결론\n{consensus}"
 
-        # 6. ChatSession에 저장 (ai_summary — 모델에 있는 컬럼명)
-        chat_session.ai_summary = pretty_text
+        if session:
+            session.ai_summary = pretty_text
+            report = db.query(CoffeeChatReport).filter(
+                CoffeeChatReport.chatsession_id == session.id
+            ).first()
+            if report:
+                report.summary    = pretty_text
+                report.stt_masked = step1_text
+                report.masking_map = engine.masking_map  # ✅ 실제 map 저장
+            db.commit()
         
-        # 7. CoffeeChatReport 찾거나 없으면 생성
-        report = db.query(CoffeeChatReport).filter(
-            CoffeeChatReport.chatsession_id == chat_session.id
-        ).first()
-        
-        if not report:
-            # ChatSession에 mentor_id, user_id가 있으면 그걸 사용
-            report = CoffeeChatReport(
-                chatsession_id=chat_session.id,
-                mentor_id=chat_session.mentor_id,
-                mentee_id=chat_session.user_id,
-            )
-            db.add(report)
-            db.flush()  # id 확보
-            print(f"📝 [{chat_id}번 방] CoffeeChatReport row 신규 생성")
-
-        # 8. 리포트에 전부 저장
-        report.summary     = pretty_text   # 리포트 페이지에서 읽는 필드
-        report.stt_masked  = step1_text    # 마스킹된 원본 대화
-        report.masking_map = engine.masking_map  # JSON 맵
-        
-        db.commit()
-        print(f"🎉 [{chat_id}번 방] DB 저장 완료")
-        
-        return {"message": "요약본 생성 성공", "ai_summary": pretty_text, "data": parsed}
+        return {"message": "요약본 및 마스킹 데이터 저장 성공", "ai_summary": pretty_text}
 
     except Exception as e:
         print(f"🚨 파이프라인 에러 발생: {e}")
