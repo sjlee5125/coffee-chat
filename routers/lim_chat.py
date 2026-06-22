@@ -249,16 +249,29 @@ async def generate_summary(chat_id: int, request: Request, db: Session = Depends
 
         if session:
             session.ai_summary = pretty_text
+
             report = db.query(CoffeeChatReport).filter(
                 CoffeeChatReport.chatsession_id == session.id
             ).first()
-            if report:
-                report.summary    = pretty_text
-                report.stt_masked = step1_text
-                report.masking_map = engine.masking_map  # ✅ 실제 map 저장
+            
+            if not report:
+                # row 없으면 새로 만들기
+                report = CoffeeChatReport(
+                    chatsession_id=session.id,
+                    mentor_id=session.mentor_id,
+                    mentee_id=session.user_id,
+                )
+                db.add(report)
+                db.flush()
+                print(f"📝 [{chat_id}번 방] CoffeeChatReport 신규 생성")
+
+            # report 있든 없든 무조건 저장
+            report.summary     = pretty_text
+            report.stt_masked  = step1_text
+            report.masking_map = engine.masking_map
+            
             db.commit()
-        
-        return {"message": "요약본 및 마스킹 데이터 저장 성공", "ai_summary": pretty_text}
+            print(f"🎉 [{chat_id}번 방] DB 저장 완료")
 
     except Exception as e:
         print(f"🚨 파이프라인 에러 발생: {e}")
