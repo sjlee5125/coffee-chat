@@ -4,7 +4,7 @@ import os
 from typing import Dict, List, Optional
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from models import get_db, ChatSession
