@@ -135,19 +135,15 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
         # JWT 세션 토큰 발행
         access_token = auth.create_access_token(data={"sub": user.email, "user_id": user.id})
         
-        # 💡 강제로 무조건 메인 페이지('/')로 보내도록 프론트엔드 URL 수정!
+        # 💡 배포된 프론트엔드 서버 IP로 주소 변경!
         if is_new_user:
-            frontend_url = f"http://localhost:5173/?token={access_token}&name={quote(user.name)}&email={quote(user.email)}&id={str(user.id)}"
+            frontend_url = f"http://48.211.169.52/?token={access_token}&name={quote(user.name)}&email={quote(user.email)}&id={str(user.id)}"
         else:
-            frontend_url = f"http://localhost:5173/?token={access_token}&name={quote(user.name)}&id={str(user.id)}"
+            frontend_url = f"http://48.211.169.52/?token={access_token}&name={quote(user.name)}&id={str(user.id)}"
 
         return RedirectResponse(url=frontend_url, status_code=status.HTTP_302_FOUND)
 
     except Exception as e:
         print(f" [ 카카오 콜백 에러]: {str(e)}")
-        return RedirectResponse(url="http://localhost:5173/login?error=true", status_code=status.HTTP_302_FOUND)
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+        # 💡 에러 발생 시 돌아갈 주소도 변경
+        return RedirectResponse(url="http://48.211.169.52/login?error=true", status_code=status.HTTP_302_FOUND)
