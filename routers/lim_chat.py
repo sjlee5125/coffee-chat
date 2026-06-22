@@ -253,9 +253,9 @@ async def generate_summary(chat_id: int, request: Request, db: Session = Depends
             report = db.query(CoffeeChatReport).filter(
                 CoffeeChatReport.chatsession_id == session.id
             ).first()
-            
+
             if not report:
-                # row 없으면 새로 만들기
+                # ✅ row 없으면 새로 생성
                 report = CoffeeChatReport(
                     chatsession_id=session.id,
                     mentor_id=session.mentor_id,
@@ -265,11 +265,11 @@ async def generate_summary(chat_id: int, request: Request, db: Session = Depends
                 db.flush()
                 print(f"📝 [{chat_id}번 방] CoffeeChatReport 신규 생성")
 
-            # report 있든 없든 무조건 저장
+            # ✅ 있든 없든 무조건 저장
             report.summary     = pretty_text
             report.stt_masked  = step1_text
             report.masking_map = engine.masking_map
-            
+
             db.commit()
             print(f"🎉 [{chat_id}번 방] DB 저장 완료")
 
