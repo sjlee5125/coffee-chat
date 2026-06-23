@@ -8,7 +8,6 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, De
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from models import get_db, ChatSession
-# DB 모델 및 의존성
 from models import SessionLocal, ChatSession, get_db, Booking, Mentor, CoffeeChatReport
 
 class RecommendQuestionRequest(BaseModel):
@@ -17,7 +16,10 @@ class RecommendQuestionRequest(BaseModel):
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+
+# ✅ 라우터 두 개로 분리
 router = APIRouter(tags=["LLM Assistant"])
+ws_router = APIRouter(tags=["LLM WebSocket"])  # WebSocket 전용
 
 AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY")
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
@@ -26,11 +28,6 @@ AZURE_API_VERSION = os.getenv("AZURE_API_VERSION", "2024-02-15-preview")
 
 try:
     from openai import AzureOpenAI
-    
-    logger.info(f"LLM KEY 존재 여부: {bool(AZURE_OPENAI_KEY)}")
-    logger.info(f"LLM ENDPOINT: {AZURE_OPENAI_ENDPOINT}")
-    logger.info(f"LLM DEPLOYMENT: {AZURE_DEPLOYMENT_NAME}")
-    
     if all([AZURE_OPENAI_KEY, AZURE_OPENAI_ENDPOINT, AZURE_DEPLOYMENT_NAME]):
         llm_client = AzureOpenAI(
             api_key=AZURE_OPENAI_KEY,
@@ -41,18 +38,14 @@ try:
     else:
         llm_client = None
         logger.warning("⚠️ Azure OpenAI 환경변수가 누락되어 LLM이 비활성화됩니다.")
-        
 except Exception as e:
     llm_client = None
-    logger.error(f"🚨 Azure OpenAI 초기화 중 에러 발생 (패키지 설치 확인): {e}")
+    logger.error(f"🚨 Azure OpenAI 초기화 중 에러 발생: {e}")
 
-# 방별 대화 히스토리 (LLM 멀티턴용)
 llm_histories: Dict[str, List[dict]] = {}
 
 def _build_system_prompt(questions: str) -> str:
-    """실시간 가독성을 극대화한 초간결 어시스턴트 프롬프트"""
     questions_text = questions.strip() if questions else "  (질문지 없음)"
-
     return f"""당신은 커리어 멘토링 중 사용자가 실시간으로 몰래 확인하는 '초간결 기술 사전 어시스턴트'입니다.
 사용자가 대화 흐름을 놓치지 않고 3초 안에 읽을 수 있도록 답변을 극단적으로 압축해야 합니다.
 
@@ -72,7 +65,8 @@ def _build_system_prompt(questions: str) -> str:
 3. 명확한 개념 구분이 필요할 때만 핵심 키워드 중심의 짧은 기호(- 또는 숫자)를 사용하되, 최대 2줄을 넘기지 마십시오."""
 
 
-@router.websocket("/ws/llm/{booking_id}/{user_id}")
+# ✅ WebSocket은 ws_router에 등록
+@ws_router.websocket("/ws/llm/{booking_id}/{user_id}")
 async def llm_assistant(websocket: WebSocket, booking_id: int, user_id: int):
     room_id = str(booking_id)
     await websocket.accept()
@@ -91,7 +85,6 @@ async def llm_assistant(websocket: WebSocket, booking_id: int, user_id: int):
 
             msg_type = data.get("type")
 
-            # 추천 질문 요청 처리
             if msg_type == "recommend_questions":
                 conversation = data.get("conversation", "")
                 preset_questions = data.get("preset_questions", "")
@@ -129,10 +122,8 @@ async def llm_assistant(websocket: WebSocket, booking_id: int, user_id: int):
 
                     content = response.choices[0].message.content.strip()
                     questions = json.loads(content)
-
                     await websocket.send_json({"type": "recommended_questions", "questions": questions})
-                    
-                    # DB 저장 로직 (flag_modified 적용)
+
                     session_db = SessionLocal()
                     try:
                         chat_session = session_db.query(ChatSession).filter(ChatSession.booking_id == booking_id).first()
@@ -172,7 +163,7 @@ async def llm_assistant(websocket: WebSocket, booking_id: int, user_id: int):
 
             messages = [{"role": "system", "content": system_prompt}] + history
             full_response = ""
-            
+
             try:
                 stream = llm_client.chat.completions.create(
                     model=AZURE_DEPLOYMENT_NAME,
@@ -201,37 +192,36 @@ async def llm_assistant(websocket: WebSocket, booking_id: int, user_id: int):
     finally:
         logger.info(f"[LLM] 연결 해제 room={room_id} uid={user_id}")
 
+
+# ✅ HTTP 엔드포인트는 기존 router에 등록
 @router.post("/{chat_id}/generate-summary")
-async def generate_summary(chat_id: int, request: Request, db: Session = Depends(get_db)): 
-    print(f"🚀 [{chat_id}번 방] 파이프라인 가동! (PDF용 JSON 및 줄글 생성)")
+async def generate_summary(chat_id: int, request: Request, db: Session = Depends(get_db)):
+    print(f"🚀 [{chat_id}번 방] 파이프라인 가동!")
 
     session = db.query(ChatSession).filter(ChatSession.booking_id == chat_id).first()
-    
+
     if session and session.stt_text:
         raw_text = session.stt_text
     else:
-        raw_text = """Host: 아, 아. 네, 아름 님 안녕하세요..."""  # fallback
+        raw_text = """Host: 아, 아. 네, 아름 님 안녕하세요..."""
 
     try:
         from routers.pipeline import MaskingEngine, agent_llm_summary
-        
-        # ✅ 엔진 하나로 전체 파이프라인 — masking_map이 유지됨
+
         engine = MaskingEngine()
         step0_text = engine.apply_regex(raw_text)
         step1_text = engine.apply_azure_ner(step0_text)
 
-        # LLM 요약 (마스킹된 텍스트로)
         final_json_str = agent_llm_summary(step1_text)
         final_json_str = final_json_str.replace("```json", "").replace("```", "").strip()
         print(f"🔎 masking_map: {engine.masking_map}")
         print(f"🔎 LLM 출력(복구 전) 일부: {final_json_str[:300]}")
+
         restored_json_str = engine.demask_text(final_json_str)
         print(f"🔎 복구 후 일부: {restored_json_str[:300]}")
-        # ✅ 반드시 demask 후 파싱 — 이게 빠져있었던 것
 
         parsed = json.loads(restored_json_str)
 
-        # 나머지 저장 로직은 그대로...
         os.makedirs("summary_data", exist_ok=True)
         with open(f"summary_data/{chat_id}.json", "w", encoding="utf-8") as f:
             json.dump(parsed, f, ensure_ascii=False)
@@ -258,7 +248,6 @@ async def generate_summary(chat_id: int, request: Request, db: Session = Depends
             ).first()
 
             if not report:
-                # ✅ row 없으면 새로 생성
                 report = CoffeeChatReport(
                     chatsession_id=session.id,
                     mentor_id=session.mentor_id,
@@ -268,7 +257,6 @@ async def generate_summary(chat_id: int, request: Request, db: Session = Depends
                 db.flush()
                 print(f"📝 [{chat_id}번 방] CoffeeChatReport 신규 생성")
 
-            # ✅ 있든 없든 무조건 저장
             report.summary     = pretty_text
             report.stt_masked  = step1_text
             report.masking_map = engine.masking_map
@@ -276,21 +264,23 @@ async def generate_summary(chat_id: int, request: Request, db: Session = Depends
             db.commit()
             print(f"🎉 [{chat_id}번 방] DB 저장 완료")
 
+        return {"message": "요약본 생성 성공", "ai_summary": pretty_text}
+
     except Exception as e:
         print(f"🚨 파이프라인 에러 발생: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"요약본 생성 중 서버 에러: {str(e)}")
 
-# ---------------------------------------- HTTP 방식 추천 질문 API ----------------------------------------
+
 @router.post("/recommend-question")
 async def recommend_question(request: RecommendQuestionRequest, db: Session = Depends(get_db)):
     print(f" [추천 질문 생성] booking_id={request.booking_id}")
-    
+
     booking = db.query(Booking).filter(Booking.id == request.booking_id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="예약 정보 없음")
-    
+
     mentor = db.query(Mentor).filter(Mentor.id == booking.mentor_id).first()
     mentor_job = mentor.job_title if mentor else "현직자"
     mentee_questions = booking.questions or ""
@@ -310,7 +300,7 @@ async def recommend_question(request: RecommendQuestionRequest, db: Session = De
         from routers.ai_service import client, DEPLOYMENT_NAME
         if not client:
             return {"questions": ["멘토님의 커리어 전환 계기가 궁금해요!", "현재 직무에서 가장 중요한 역량은 무엇인가요?", "신입으로서 준비해야 할 것들이 있을까요?"]}
-        
+
         response = client.chat.completions.create(
             model=DEPLOYMENT_NAME,
             messages=[
@@ -320,10 +310,10 @@ async def recommend_question(request: RecommendQuestionRequest, db: Session = De
             temperature=0.7,
             max_tokens=500
         )
-        
+
         content = response.choices[0].message.content.strip()
         return {"questions": json.loads(content)}
-        
+
     except Exception as e:
         print(f" [추천 질문 생성 실패]: {e}")
         return {"questions": [

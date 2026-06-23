@@ -16,7 +16,7 @@ from openai import AzureOpenAI
 from auth import router
 from models import User, Mentor, Booking, MentorAvailability, ChatSession, get_db, create_tables
 import auth
-from routers import users, mentors, bookings, ai, notifications, chat, chat_router, webrtc, stt, lim_chat, pipeline, general_chat, support , announcement, chatbot,reports
+from routers.lim_chat import router as lim_chat_router, ws_router as lim_chat_ws_router
 from routers.dashboard_router import router as dashboard_router_obj
 from services.scheduler import scheduler
 # 서버 실행 시 시스템의 .env 환경변수를 로드
@@ -73,7 +73,8 @@ app.include_router(chat_router.router)
 app.include_router(general_chat.router)
 app.include_router(webrtc.router)
 app.include_router(stt.router)
-app.include_router(lim_chat.router, prefix="/api/chat-session")
+app.include_router(lim_chat_ws_router)                              # WebSocket: prefix 없음
+app.include_router(lim_chat.router, prefix="/api/chat-session") 
 app.include_router(dashboard_router_obj)
 app.include_router(support.router)
 #app.include_router(pipeline.router)
