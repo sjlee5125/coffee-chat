@@ -138,30 +138,19 @@ def agent_llm_masking(text):
     return text
 
 #llm summary
-def agent_llm_summary(safe_text):
-    print("📝 [Agent 3] Summary AI 가동...")
+def agent_llm_summary(text: str) -> str:
+    # 기존에 정의된 system_prompt 또는 지시사항 부분에 아래 내용을 보강합니다.
     system_prompt = """
-    당신은 커피챗 매칭 플랫폼의 수석 데이터 아키텍트입니다.
-    커피챗 대화 스크립트에서 객관적 사실만을 발라내어 아래 JSON 구조로 변환하세요.
-    {
-        "session_metadata": {
-            "industry_and_role": "주요 산업군 및 직무",
-            "guest_as_is": "게스트의 현재 상황과 병목",
-            "guest_to_be": "게스트의 목표"
-        },
-        "core_agendas": [
-            {
-                "agenda_title": "핵심 논의 안건",
-                "guest_context": "게스트 질문/한계점",
-                "host_solution": "호스트 해결책"
-            }
-        ],
-        "extracted_keywords": {
-            "tools_and_skills": ["하드스킬 키워드"],
-            "business_terms": ["비즈니스 용어"]
-        },
-        "session_consensus": "최종 합의점"
-    }
+    당신은 커피챗 대화록을 분석하여 지정된 JSON 구조로 요약본을 만드는 전문가입니다.
+    대화록에는 'Host(멘토)'와 'Guest(멘티)' 두 명의 화자가 등장합니다. 두 사람의 역할과 발언을 절대 혼동해서는 안 됩니다.
+
+    [🚨 화자 구분 및 요약 규칙 - 필수 엄수]
+    1. 'Host:' 또는 'Mentor:' 문장은 멘토의 발언입니다. 멘토가 자신의 경험(예: 외국계 대기업 마이크로소프트 근무 경험 등)을 이야기하거나 조언한 내용을 절대로 Guest(멘티)의 상황이나 목표로 오인하여 작성하지 마십시오.
+    2. 'Guest:' 또는 'Mentee:' 문장만 멘티의 실제 정보입니다. 멘티가 직접 말한 현재 상황(As-Is)과 개인적인 목표(To-Be)만 요약의 1번 항목(session_metadata)에 넣어야 합니다.
+    3. 만약 멘토가 예시를 들었거나 조언한 내용 중 핵심적인 해결책은 2번 항목(core_agendas)의 'host_solution'에만 위치해야 합니다.
+    4. 대화록에서 멘티가 명확한 목표를 말하지 않았다면, 멘토의 목표를 대신 넣지 말고 '대화 중 언급 없음' 또는 빈칸으로 비워두십시오.
+
+    반드시 위 규칙을 기반으로 Host와 Guest의 주어를 명확히 구분하여 요약 결과를 JSON 배열로 반환하세요.
     """
     try:
         if not openai_client:
