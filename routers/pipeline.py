@@ -187,7 +187,7 @@ def agent_llm_summary(text: str) -> str:
 # ==========================================
 # 📊 4. PDF 생성
 # ==========================================
-def generate_pdf_report(parsed_json, output_filename):
+def generate_pdf_report(parsed_json, output_filename, ai_advice=None):
     pdf = FPDF()
     pdf.add_page()
     font_path = "C:/Windows/Fonts/malgun.ttf"
@@ -245,4 +245,14 @@ def generate_pdf_report(parsed_json, output_filename):
         pdf.ln(3)
 
     write_section("3. 최종 합의점 및 결론", parsed_json.get("session_consensus", ""))
+    
+    # 🌟 이 부분 추가! (어드바이스 내용이 있으면 새 페이지에 작성)
+    if ai_advice:
+        pdf.add_page()
+        pdf.set_font("Malgun", "B", 14)
+        pdf.cell(0, 10, "4. 페이스메이커 어드바이스", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(5)
+        pdf.set_font("Malgun", "", 11)
+        safe_print_text(ai_advice)
+
     pdf.output(output_filename)
