@@ -99,15 +99,17 @@ async def llm_assistant(websocket: WebSocket, booking_id: int, user_id: int):
                     continue
 
                 try:
-                    recommend_prompt = f"""멘티가 사전에 준비한 질문 목록:
-                    {preset_questions if preset_questions else '없음'}
-
-                    지금까지 나눈 대화 내용:
+                    recommend_prompt = f"""[우선순위 1: 지금까지 나눈 실시간 대화 내용]
                     {conversation if conversation else '아직 대화 없음'}
 
-                    위 두 가지를 모두 참고해서 지금 이 순간 멘티가 물어보면 가장 좋을 질문 3개를 추천해주세요.
-                    사전 질문 중 아직 안 한 것 위주로, 대화 흐름에 맞게 골라주세요.
-                    반드시 JSON 배열로만 응답하세요.
+                    [우선순위 2: 멘티가 사전에 준비한 질문 목록]
+                    {preset_questions if preset_questions else '없음'}
+
+                    위 내용을 바탕으로, 지금 당장 멘티가 물어보면 가장 자연스럽고 좋은 질문 3개를 추천해주세요.
+                    지침:
+                    1. '우선순위 1(실시간 대화 내용)'의 맥락을 최우선으로 파악하여, 현재 대화 주제와 바로 이어지는 꼬리 질문을 생성하세요.
+                    2. '우선순위 2(사전 질문)'는 대화 내용이 부족하거나 화제를 전환할 때만 참고하세요.
+                    3. 반드시 JSON 배열로만 응답하세요.
                     예시: ["질문1", "질문2", "질문3"]"""
 
                     response = llm_client.chat.completions.create(
