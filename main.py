@@ -16,6 +16,7 @@ from openai import AzureOpenAI
 from auth import router
 from models import User, Mentor, Booking, MentorAvailability, ChatSession, get_db, create_tables
 import auth
+from routers import users, mentors, bookings, ai, notifications, chat, chat_router, webrtc, stt, lim_chat, pipeline, general_chat, support , announcement, chatbot,reports
 from routers.lim_chat import router as lim_chat_router, ws_router as lim_chat_ws_router
 from routers.dashboard_router import router as dashboard_router_obj
 from services.scheduler import scheduler
