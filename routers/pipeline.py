@@ -139,7 +139,6 @@ def agent_llm_masking(text):
 
 #llm summary
 def agent_llm_summary(text: str) -> str:
-    # 기존에 정의된 system_prompt 또는 지시사항 부분에 아래 내용을 보강합니다.
     system_prompt = """
     당신은 커피챗 대화록을 분석하여 지정된 JSON 구조로 요약본을 만드는 전문가입니다.
     대화록에는 'Host(멘토)'와 'Guest(멘티)' 두 명의 화자가 등장합니다. 두 사람의 역할과 발언을 절대 혼동해서는 안 됩니다.
@@ -150,7 +149,22 @@ def agent_llm_summary(text: str) -> str:
     3. 만약 멘토가 예시를 들었거나 조언한 내용 중 핵심적인 해결책은 2번 항목(core_agendas)의 'host_solution'에만 위치해야 합니다.
     4. 대화록에서 멘티가 명확한 목표를 말하지 않았다면, 멘토의 목표를 대신 넣지 말고 '대화 중 언급 없음' 또는 빈칸으로 비워두십시오.
 
-    반드시 위 규칙을 기반으로 Host와 Guest의 주어를 명확히 구분하여 요약 결과를 JSON 배열로 반환하세요.
+    [✅ 필수 JSON 출력 형식]
+    반드시 아래의 JSON 구조를 100% 동일하게 지켜서 응답하세요. 다른 설명 없이 JSON만 반환해야 합니다.
+    {
+      "session_metadata": {
+        "guest_as_is": "게스트의 현재 상황 요약",
+        "guest_to_be": "게스트의 목표 요약"
+      },
+      "core_agendas": [
+        {
+          "agenda_title": "논의 주제",
+          "guest_context": "게스트의 질문이나 고민",
+          "host_solution": "호스트의 답변 및 해결책"
+        }
+      ],
+      "session_consensus": "최종 합의점 및 결론"
+    }
     """
     try:
         if not openai_client:
@@ -163,13 +177,12 @@ def agent_llm_summary(text: str) -> str:
             max_tokens=4000,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": safe_text}
+                {"role": "user", "content": text}  # 👈 safe_text를 text로 수정 완료!
             ]
         )
         return response.choices[0].message.content
     except Exception as e:
         return f'{{"error": "LLM 요약 중 에러 발생: {str(e)}"}}'
-
 
 # ==========================================
 # 📊 4. PDF 생성
