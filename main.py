@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict, List
 from dotenv import load_dotenv
 from openai import AzureOpenAI
-
+from fastapi.middleware.cors import CORSMiddleware
 from auth import router
 from models import User, Mentor, Booking, MentorAvailability, ChatSession, get_db, create_tables
 import auth
