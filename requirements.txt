@@ -44,3 +44,4 @@ pycparser==3.0
 urllib3==2.7.0
 watchfiles==1.1.1
 annotated-doc==0.0.4
+python-multipart==0.0.20
