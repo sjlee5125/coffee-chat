@@ -48,3 +48,5 @@ urllib3==2.7.0
 watchfiles==1.1.1
 annotated-doc==0.0.4
 tqdm==4.68.3
+fpdf2==2.8.2
+weasyprint==63.1
