@@ -66,4 +66,4 @@ pip install -r requirements.txt
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 
-Frontend 레포지토리는 [여기(https://github.com/q2qeq/teatimes.git)] 에서 확인할 수 있습니다.
+Frontend 레포지토리는 https://github.com/sjlee5125/teatimes-prod.git 에서 확인할 수 있습니다.
