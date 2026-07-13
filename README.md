@@ -8,7 +8,7 @@
 
 ## 📺 프로젝트 핵심 자료
 - **🎥 [서비스 통합 시연 영상 보러가기](https://www.youtube.com/watch?v=IlpLFsgf6fc)**
-- **💻 연동되는 Frontend 레포지토리 주소**: `[https://github.com/q2qeq/teatimes](https://github.com/q2qeq/teatimes)`
+- **💻 연동되는 Frontend 레포지토리 주소**: [https://github.com/q2qeq/teatimes](https://github.com/q2qeq/teatimes)
 
 ---
 
